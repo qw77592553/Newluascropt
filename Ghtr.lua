@@ -7,14 +7,11 @@ local Workspace = game:GetService("Workspace")
 local Players = game:GetService("Players")
 local Camera = Workspace.CurrentCamera
 
--- ================== СИСТЕМА КЛЮЧА ==================
+-- ================== КЛЮЧ ==================
 local function generateKey()
-	local timestamp = os.time()
-	local keySeed = math.floor(timestamp / (5 * 60 * 60))
-	local seed = keySeed % 100000
+	local seed = math.floor(os.time() / (5 * 60 * 60)) % 100000
 	return string.format("%05d", (seed * 37 + 12345) % 100000)
 end
-
 local VALID_KEY = generateKey()
 
 local screenGui = Instance.new("ScreenGui")
@@ -57,7 +54,6 @@ keyInput.Size = UDim2.new(1, -30, 0, 28)
 keyInput.Position = UDim2.new(0, 15, 0, 60)
 keyInput.BackgroundColor3 = Color3.fromRGB(30, 40, 70)
 keyInput.BorderSizePixel = 0
-keyInput.Text = ""
 keyInput.PlaceholderText = "Ключ..."
 keyInput.PlaceholderColor3 = Color3.fromRGB(150, 150, 150)
 keyInput.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -74,6 +70,7 @@ keyError.Text = ""
 keyError.TextColor3 = Color3.fromRGB(255, 80, 80)
 keyError.Font = Enum.Font.Gotham
 keyError.TextSize = 11
+keyError.TextWrapped = true
 keyError.Parent = keyFrame
 
 local keyButton = Instance.new("TextButton")
@@ -91,30 +88,50 @@ Instance.new("UICorner", keyButton).CornerRadius = UDim.new(0, 4)
 local mainFrame = nil
 
 keyButton.MouseButton1Click:Connect(function()
-	if keyInput.Text == VALID_KEY then
-		keyFrame:Destroy()
-		createMainMenu()
-	else
+	if keyInput.Text ~= VALID_KEY then
 		keyError.Text = "Неверный ключ!"
+		return
+	end
+	if type(createMainMenu) ~= "function" then
+		keyError.Text = "Ошибка: меню не загружено"
+		warn("[Helper Farm] createMainMenu is nil")
+		return
+	end
+	local ok, err = pcall(createMainMenu)
+	if ok then
+		keyFrame:Destroy()
+	else
+		keyError.Text = "Ошибка: " .. tostring(err):sub(1, 80)
+		warn("[Helper Farm] " .. tostring(err))
+		print(debug.traceback())
 	end
 end)
 
--- ================== ЛОГИКА МАШИНЫ ==================
+-- ================== ЛОГИКА ТРАНСПОРТА ==================
 local driving = false
 local activeCar = nil
 local carSeat = nil
 local carSpeed = 0
+local carVertical = 0
+local activeVehicleCanFly = false
+local activeRotors = {}
+
 local CAR_MAX_SPEED = 90
 local CAR_ACCEL = 45
 local CAR_TURN_SPEED = 2.2
+local FLY_MAX_SPEED = 70
+local FLY_ACCEL = 35
+local FLY_VERTICAL_SPEED = 45
 
--- Флаги кнопок управления
+local selectedVehicleType = "car"
+
 local carBtnForward = false
 local carBtnBackward = false
 local carBtnLeft = false
 local carBtnRight = false
+local carBtnVertUp = false
+local carBtnVertDown = false
 
--- ГУИ с кнопками управления
 local carControlsGui = Instance.new("Frame")
 carControlsGui.Name = "CarControls"
 carControlsGui.Size = UDim2.new(1, 0, 1, 0)
@@ -145,6 +162,10 @@ local carBtnUp = makeCarBtn("▲", UDim2.new(0, 30, 1, -220), 70)
 local carBtnDown = makeCarBtn("▼", UDim2.new(0, 30, 1, -140), 70)
 local carBtnLeft = makeCarBtn("◄", UDim2.new(0, 110, 1, -180), 70)
 local carBtnRight = makeCarBtn("►", UDim2.new(1, -180, 1, -180), 70)
+local carBtnVertUp = makeCarBtn("▲", UDim2.new(1, -180, 1, -280), 60)
+local carBtnVertDown = makeCarBtn("▼", UDim2.new(1, -180, 1, -210), 60)
+carBtnVertUp.Visible = false
+carBtnVertDown.Visible = false
 
 local carExitBtn = Instance.new("TextButton")
 carExitBtn.Size = UDim2.new(0, 90, 0, 40)
@@ -169,21 +190,17 @@ local function bindHoldButton(btn, setter)
 		btn.BackgroundColor3 = state and pressColor or baseColor
 	end
 	btn.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			setState(true)
 		end
 	end)
 	btn.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			setState(false)
 		end
 	end)
 	btn.MouseLeave:Connect(function()
-		if btn.BackgroundColor3 == pressColor then
-			setState(false)
-		end
+		if btn.BackgroundColor3 == pressColor then setState(false) end
 	end)
 end
 
@@ -191,8 +208,11 @@ bindHoldButton(carBtnUp, function(v) carBtnForward = v end)
 bindHoldButton(carBtnDown, function(v) carBtnBackward = v end)
 bindHoldButton(carBtnLeft, function(v) carBtnLeft = v end)
 bindHoldButton(carBtnRight, function(v) carBtnRight = v end)
+bindHoldButton(carBtnVertUp, function(v) carBtnVertUp = v end)
+bindHoldButton(carBtnVertDown, function(v) carBtnVertDown = v end)
 
-local function buildCustomCar()
+-- ================== ПОСТРОЙКА ТРАНСПОРТА ==================
+local function buildVehicle(vehicleType)
 	local char = player.Character
 	if not char then return nil, "Персонаж не найден" end
 	local root = char:FindFirstChild("HumanoidRootPart")
@@ -220,7 +240,9 @@ local function buildCustomCar()
 	)
 
 	local car = Instance.new("Model")
-	car.Name = "CustomCar_" .. tostring(math.floor(tick() * 1000))
+	car.Name = "Vehicle_" .. vehicleType .. "_" .. tostring(math.floor(tick() * 1000))
+
+	local rotors = {}
 
 	local function mkPart(props)
 		local p = Instance.new("Part")
@@ -241,102 +263,105 @@ local function buildCustomCar()
 		return p
 	end
 
-	local chassis = mkPart({
-		name = "Chassis",
-		size = Vector3.new(6, 1.5, 12),
-		color = Color3.fromRGB(200, 40, 40),
-		material = Enum.Material.Metal,
-		offset = Vector3.new(0, 1.5, 0),
-	})
+	local chassis, seat
 
-	mkPart({
-		name = "Cabin",
-		size = Vector3.new(5.5, 1.8, 6),
-		color = Color3.fromRGB(180, 30, 30),
-		material = Enum.Material.Metal,
-		offset = Vector3.new(0, 3.2, 0.5),
-	})
+	if vehicleType == "car" then
+		chassis = mkPart({name="Chassis", size=Vector3.new(6,1.5,12), color=Color3.fromRGB(200,40,40), material=Enum.Material.Metal, offset=Vector3.new(0,1.5,0)})
+		mkPart({name="Cabin", size=Vector3.new(5.5,1.8,6), color=Color3.fromRGB(180,30,30), material=Enum.Material.Metal, offset=Vector3.new(0,3.2,0.5)})
+		mkPart({name="Windshield", size=Vector3.new(5.3,1.4,0.15), color=Color3.fromRGB(120,200,255), material=Enum.Material.Glass, transparency=0.4, offset=Vector3.new(0,3.2,-2.5)})
+		for _, wp in ipairs({
+			{Vector3.new(-3.2,1.1,-3.8),"FL"},{Vector3.new(3.2,1.1,-3.8),"FR"},
+			{Vector3.new(-3.2,1.1,3.8),"BL"},{Vector3.new(3.2,1.1,3.8),"BR"},
+		}) do
+			mkPart({name=wp[2], size=Vector3.new(1,2.2,2.2), color=Color3.fromRGB(20,20,20), material=Enum.Material.Rubber, shape=Enum.PartType.Cylinder, offset=wp[1]})
+		end
+		mkPart({name="HL1", size=Vector3.new(0.9,0.9,0.9), color=Color3.fromRGB(255,240,150), material=Enum.Material.Neon, shape=Enum.PartType.Ball, offset=Vector3.new(-2,1.7,-5.9)})
+		mkPart({name="HL2", size=Vector3.new(0.9,0.9,0.9), color=Color3.fromRGB(255,240,150), material=Enum.Material.Neon, shape=Enum.PartType.Ball, offset=Vector3.new(2,1.7,-5.9)})
+		seat = mkPart({name="SeatPoint", size=Vector3.new(2,0.4,2), color=Color3.fromRGB(30,30,30), transparency=1, offset=Vector3.new(0,2.8,-0.5)})
 
-	mkPart({
-		name = "Windshield",
-		size = Vector3.new(5.3, 1.4, 0.15),
-		color = Color3.fromRGB(120, 200, 255),
-		material = Enum.Material.Glass,
-		transparency = 0.4,
-		offset = Vector3.new(0, 3.2, -2.5),
-	})
+	elseif vehicleType == "gelik" then
+		chassis = mkPart({name="Chassis", size=Vector3.new(6,2,12), color=Color3.fromRGB(25,25,25), material=Enum.Material.Metal, offset=Vector3.new(0,1.7,0)})
+		mkPart({name="Cabin", size=Vector3.new(5.8,2.2,7), color=Color3.fromRGB(15,15,15), material=Enum.Material.Metal, offset=Vector3.new(0,3.8,0.5)})
+		mkPart({name="Windshield", size=Vector3.new(5.5,1.7,0.15), color=Color3.fromRGB(100,180,220), material=Enum.Material.Glass, transparency=0.35, offset=Vector3.new(0,3.9,-3)})
+		mkPart({name="RearGlass", size=Vector3.new(5.5,1.7,0.15), color=Color3.fromRGB(100,180,220), material=Enum.Material.Glass, transparency=0.35, offset=Vector3.new(0,3.9,4)})
+		mkPart({name="RoofLight1", size=Vector3.new(0.5,0.5,0.5), color=Color3.fromRGB(255,240,150), material=Enum.Material.Neon, shape=Enum.PartType.Ball, offset=Vector3.new(-1.5,5.1,-2)})
+		mkPart({name="RoofLight2", size=Vector3.new(0.5,0.5,0.5), color=Color3.fromRGB(255,240,150), material=Enum.Material.Neon, shape=Enum.PartType.Ball, offset=Vector3.new(1.5,5.1,-2)})
+		for _, wp in ipairs({
+			{Vector3.new(-3.2,1.2,-4),"FL"},{Vector3.new(3.2,1.2,-4),"FR"},
+			{Vector3.new(-3.2,1.2,4),"BL"},{Vector3.new(3.2,1.2,4),"BR"},
+		}) do
+			mkPart({name=wp[2], size=Vector3.new(1.2,2.4,2.4), color=Color3.fromRGB(15,15,15), material=Enum.Material.Rubber, shape=Enum.PartType.Cylinder, offset=wp[1]})
+		end
+		seat = mkPart({name="SeatPoint", size=Vector3.new(2,0.4,2), color=Color3.fromRGB(30,30,30), transparency=1, offset=Vector3.new(0,3.4,-0.5)})
 
-	mkPart({
-		name = "RearGlass",
-		size = Vector3.new(5.3, 1.4, 0.15),
-		color = Color3.fromRGB(120, 200, 255),
-		material = Enum.Material.Glass,
-		transparency = 0.4,
-		offset = Vector3.new(0, 3.2, 3.5),
-	})
+	elseif vehicleType == "truck" then
+		chassis = mkPart({name="Chassis", size=Vector3.new(7,1.6,18), color=Color3.fromRGB(40,80,180), material=Enum.Material.Metal, offset=Vector3.new(0,1.7,0)})
+		mkPart({name="Cabin", size=Vector3.new(6.8,2.6,6), color=Color3.fromRGB(30,60,160), material=Enum.Material.Metal, offset=Vector3.new(0,4,-5)})
+		mkPart({name="Windshield", size=Vector3.new(6.5,2,0.15), color=Color3.fromRGB(120,200,255), material=Enum.Material.Glass, transparency=0.4, offset=Vector3.new(0,4.2,-8)})
+		mkPart({name="Cargo", size=Vector3.new(6.8,3,10), color=Color3.fromRGB(180,180,180), material=Enum.Material.Metal, offset=Vector3.new(0,3.6,3.5)})
+		mkPart({name="CargoTop", size=Vector3.new(7,0.3,10.2), color=Color3.fromRGB(200,200,200), material=Enum.Material.Metal, offset=Vector3.new(0,5.2,3.5)})
+		for _, wp in ipairs({
+			{Vector3.new(-3.7,1.3,-6),"FL"},{Vector3.new(3.7,1.3,-6),"FR"},
+			{Vector3.new(-3.7,1.3,2),"ML"},{Vector3.new(3.7,1.3,2),"MR"},
+			{Vector3.new(-3.7,1.3,7),"BL"},{Vector3.new(3.7,1.3,7),"BR"},
+		}) do
+			mkPart({name=wp[2], size=Vector3.new(1.2,2.6,2.6), color=Color3.fromRGB(20,20,20), material=Enum.Material.Rubber, shape=Enum.PartType.Cylinder, offset=wp[1]})
+		end
+		mkPart({name="HL1", size=Vector3.new(1,1,1), color=Color3.fromRGB(255,240,150), material=Enum.Material.Neon, shape=Enum.PartType.Ball, offset=Vector3.new(-2.5,1.8,-9)})
+		mkPart({name="HL2", size=Vector3.new(1,1,1), color=Color3.fromRGB(255,240,150), material=Enum.Material.Neon, shape=Enum.PartType.Ball, offset=Vector3.new(2.5,1.8,-9)})
+		seat = mkPart({name="SeatPoint", size=Vector3.new(2,0.4,2), color=Color3.fromRGB(30,30,30), transparency=1, offset=Vector3.new(0,3.5,-5)})
 
-	for _, wp in ipairs({
-		{Vector3.new(-3.2, 1.1, -3.8), "FrontLeft"},
-		{Vector3.new( 3.2, 1.1, -3.8), "FrontRight"},
-		{Vector3.new(-3.2, 1.1,  3.8), "BackLeft"},
-		{Vector3.new( 3.2, 1.1,  3.8), "BackRight"},
-	}) do
-		mkPart({
-			name = wp[2],
-			size = Vector3.new(1, 2.2, 2.2),
-			color = Color3.fromRGB(20, 20, 20),
-			material = Enum.Material.Rubber,
-			shape = Enum.PartType.Cylinder,
-			offset = wp[1],
-		})
+	elseif vehicleType == "tank" then
+		chassis = mkPart({name="Chassis", size=Vector3.new(7,2,14), color=Color3.fromRGB(60,80,50), material=Enum.Material.Metal, offset=Vector3.new(0,1.8,0)})
+		mkPart({name="TrackL", size=Vector3.new(1.2,2.4,14), color=Color3.fromRGB(20,20,20), material=Enum.Material.Rubber, offset=Vector3.new(-3.7,1.2,0)})
+		mkPart({name="TrackR", size=Vector3.new(1.2,2.4,14), color=Color3.fromRGB(20,20,20), material=Enum.Material.Rubber, offset=Vector3.new(3.7,1.2,0)})
+		mkPart({name="Turret", size=Vector3.new(5,1.8,5), color=Color3.fromRGB(50,70,40), material=Enum.Material.Metal, offset=Vector3.new(0,4,0)})
+		mkPart({name="Barrel", size=Vector3.new(0.6,0.6,7), color=Color3.fromRGB(40,50,30), material=Enum.Material.Metal, offset=Vector3.new(0,4,-5.5)})
+		mkPart({name="HatchL", size=Vector3.new(1.8,0.2,1.8), color=Color3.fromRGB(40,50,30), material=Enum.Material.Metal, offset=Vector3.new(0,5,1)})
+		seat = mkPart({name="SeatPoint", size=Vector3.new(2,0.4,2), color=Color3.fromRGB(30,30,30), transparency=1, offset=Vector3.new(0,3.3,1)})
+
+	elseif vehicleType == "helicopter" then
+		chassis = mkPart({name="Chassis", size=Vector3.new(4.5,2.5,7), color=Color3.fromRGB(50,90,180), material=Enum.Material.Metal, offset=Vector3.new(0,3,0)})
+		mkPart({name="Cabin", size=Vector3.new(4.3,2,3), color=Color3.fromRGB(120,180,255), material=Enum.Material.Glass, transparency=0.35, offset=Vector3.new(0,3.2,-3.5)})
+		mkPart({name="Tail", size=Vector3.new(1.2,1.2,7), color=Color3.fromRGB(40,80,170), material=Enum.Material.Metal, offset=Vector3.new(0,3.5,7)})
+		mkPart({name="TailFin", size=Vector3.new(0.3,2.5,2), color=Color3.fromRGB(40,80,170), material=Enum.Material.Metal, offset=Vector3.new(0,4.5,10)})
+		mkPart({name="SkidL", size=Vector3.new(0.4,0.4,6), color=Color3.fromRGB(40,40,40), material=Enum.Material.Metal, offset=Vector3.new(-2,1.5,0)})
+		mkPart({name="SkidR", size=Vector3.new(0.4,0.4,6), color=Color3.fromRGB(40,40,40), material=Enum.Material.Metal, offset=Vector3.new(2,1.5,0)})
+		mkPart({name="SkidLegL1", size=Vector3.new(0.4,1.2,0.4), color=Color3.fromRGB(40,40,40), material=Enum.Material.Metal, offset=Vector3.new(-2,2.1,-2)})
+		mkPart({name="SkidLegR1", size=Vector3.new(0.4,1.2,0.4), color=Color3.fromRGB(40,40,40), material=Enum.Material.Metal, offset=Vector3.new(2,2.1,-2)})
+		mkPart({name="SkidLegL2", size=Vector3.new(0.4,1.2,0.4), color=Color3.fromRGB(40,40,40), material=Enum.Material.Metal, offset=Vector3.new(-2,2.1,2)})
+		mkPart({name="SkidLegR2", size=Vector3.new(0.4,1.2,0.4), color=Color3.fromRGB(40,40,40), material=Enum.Material.Metal, offset=Vector3.new(2,2.1,2)})
+		mkPart({name="RotorPole", size=Vector3.new(0.4,0.5,0.4), color=Color3.fromRGB(30,30,30), material=Enum.Material.Metal, offset=Vector3.new(0,4.5,0)})
+		local mainRotor = mkPart({name="MainRotor", size=Vector3.new(14,0.15,0.6), color=Color3.fromRGB(40,40,40), material=Enum.Material.Metal, offset=Vector3.new(0,4.9,0)})
+		local tailRotor = mkPart({name="TailRotor", size=Vector3.new(3,0.15,0.4), color=Color3.fromRGB(40,40,40), material=Enum.Material.Metal, offset=Vector3.new(0,4.5,10.4)})
+		tailRotor.CFrame = baseCF * CFrame.new(0, 4.5, 10.4) * CFrame.Angles(0, 0, math.rad(90))
+		table.insert(rotors, {part = mainRotor, axis = "y", speed = 25})
+		table.insert(rotors, {part = tailRotor, axis = "x", speed = 40})
+		seat = mkPart({name="SeatPoint", size=Vector3.new(2,0.4,2), color=Color3.fromRGB(30,30,30), transparency=1, offset=Vector3.new(0,3.5,0)})
+
+	elseif vehicleType == "plane" then
+		chassis = mkPart({name="Chassis", size=Vector3.new(3,2,16), color=Color3.fromRGB(220,220,220), material=Enum.Material.Metal, offset=Vector3.new(0,3,0)})
+		mkPart({name="Nose", size=Vector3.new(2.5,2,3), color=Color3.fromRGB(200,200,200), material=Enum.Material.Metal, offset=Vector3.new(0,3,-8.5)})
+		mkPart({name="Cockpit", size=Vector3.new(2.5,1.5,3), color=Color3.fromRGB(120,200,255), material=Enum.Material.Glass, transparency=0.35, offset=Vector3.new(0,4.3,-4)})
+		mkPart({name="WingMain", size=Vector3.new(18,0.4,3), color=Color3.fromRGB(200,200,200), material=Enum.Material.Metal, offset=Vector3.new(0,3,0)})
+		mkPart({name="WingTipL", size=Vector3.new(0.4,1.5,2), color=Color3.fromRGB(220,60,60), material=Enum.Material.Metal, offset=Vector3.new(-9,3.5,0.5)})
+		mkPart({name="WingTipR", size=Vector3.new(0.4,1.5,2), color=Color3.fromRGB(220,60,60), material=Enum.Material.Metal, offset=Vector3.new(9,3.5,0.5)})
+		mkPart({name="TailWing", size=Vector3.new(7,0.3,2), color=Color3.fromRGB(200,200,200), material=Enum.Material.Metal, offset=Vector3.new(0,3.5,7.5)})
+		mkPart({name="TailFin", size=Vector3.new(0.3,3,2), color=Color3.fromRGB(200,200,200), material=Enum.Material.Metal, offset=Vector3.new(0,4.5,7.5)})
+		mkPart({name="EngineL", size=Vector3.new(2,1.5,4), color=Color3.fromRGB(80,80,80), material=Enum.Material.Metal, offset=Vector3.new(-4,2.2,0)})
+		mkPart({name="EngineR", size=Vector3.new(2,1.5,4), color=Color3.fromRGB(80,80,80), material=Enum.Material.Metal, offset=Vector3.new(4,2.2,0)})
+		local propL = mkPart({name="PropL", size=Vector3.new(0.3,4,0.3), color=Color3.fromRGB(30,30,30), material=Enum.Material.Metal, offset=Vector3.new(-4,2.2,-2.2)})
+		local propR = mkPart({name="PropR", size=Vector3.new(0.3,4,0.3), color=Color3.fromRGB(30,30,30), material=Enum.Material.Metal, offset=Vector3.new(4,2.2,-2.2)})
+		table.insert(rotors, {part = propL, axis = "z", speed = 50})
+		table.insert(rotors, {part = propR, axis = "z", speed = 50})
+		seat = mkPart({name="SeatPoint", size=Vector3.new(2,0.4,2), color=Color3.fromRGB(30,30,30), transparency=1, offset=Vector3.new(0,3.5,-0.5)})
 	end
-
-	mkPart({
-		name = "HeadlightL",
-		size = Vector3.new(0.9, 0.9, 0.9),
-		color = Color3.fromRGB(255, 240, 150),
-		material = Enum.Material.Neon,
-		shape = Enum.PartType.Ball,
-		offset = Vector3.new(-2, 1.7, -5.9),
-	})
-	mkPart({
-		name = "HeadlightR",
-		size = Vector3.new(0.9, 0.9, 0.9),
-		color = Color3.fromRGB(255, 240, 150),
-		material = Enum.Material.Neon,
-		shape = Enum.PartType.Ball,
-		offset = Vector3.new(2, 1.7, -5.9),
-	})
-
-	mkPart({
-		name = "TaillightL",
-		size = Vector3.new(0.8, 0.8, 0.8),
-		color = Color3.fromRGB(255, 60, 60),
-		material = Enum.Material.Neon,
-		shape = Enum.PartType.Ball,
-		offset = Vector3.new(-2, 1.7, 5.9),
-	})
-	mkPart({
-		name = "TaillightR",
-		size = Vector3.new(0.8, 0.8, 0.8),
-		color = Color3.fromRGB(255, 60, 60),
-		material = Enum.Material.Neon,
-		shape = Enum.PartType.Ball,
-		offset = Vector3.new(2, 1.7, 5.9),
-	})
-
-	local seat = mkPart({
-		name = "SeatPoint",
-		size = Vector3.new(2, 0.4, 2),
-		color = Color3.fromRGB(30, 30, 30),
-		material = Enum.Material.SmoothPlastic,
-		offset = Vector3.new(0, 2.8, -0.5),
-	})
-	seat.Transparency = 1
 
 	car.PrimaryPart = chassis
 	car.Parent = Workspace
-	return car, seat
+
+	local canFly = (vehicleType == "helicopter" or vehicleType == "plane")
+	return car, seat, canFly, rotors
 end
 
 local function forceSitPlayer(car, seat)
@@ -356,7 +381,7 @@ local function forceSitPlayer(car, seat)
 	return true
 end
 
-local function enterCar(car, seat)
+local function enterCar(car, seat, canFly, rotors)
 	if driving then return end
 
 	local char = player.Character
@@ -373,10 +398,15 @@ local function enterCar(car, seat)
 	activeCar = car
 	carSeat = seat
 	carSpeed = 0
+	carVertical = 0
+	activeVehicleCanFly = canFly or false
+	activeRotors = rotors or {}
 
 	forceSitPlayer(car, seat)
 
 	carControlsGui.Visible = true
+	carBtnVertUp.Visible = activeVehicleCanFly
+	carBtnVertDown.Visible = activeVehicleCanFly
 	return true
 end
 
@@ -387,9 +417,15 @@ local function exitCar()
 	activeCar = nil
 	carSeat = nil
 	carSpeed = 0
+	carVertical = 0
+	activeVehicleCanFly = false
+	activeRotors = {}
 
 	carControlsGui.Visible = false
+	carBtnVertUp.Visible = false
+	carBtnVertDown.Visible = false
 	carBtnForward, carBtnBackward, carBtnLeft, carBtnRight = false, false, false, false
+	carBtnVertUp, carBtnVertDown = false, false
 
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -409,9 +445,7 @@ local function exitCar()
 	end
 end
 
-carExitBtn.MouseButton1Click:Connect(function()
-	exitCar()
-end)
+carExitBtn.MouseButton1Click:Connect(function() exitCar() end)
 
 -- ================== ЛУП УПРАВЛЕНИЯ ==================
 local carDriveConnection = RunService.Heartbeat:Connect(function(dt)
@@ -421,20 +455,26 @@ local carDriveConnection = RunService.Heartbeat:Connect(function(dt)
 	end
 
 	local seat = carSeat
-	if not seat or not seat.Parent then
-		exitCar()
-		return
-	end
+	if not seat or not seat.Parent then exitCar(); return end
 
 	local char = player.Character
 	local hum = char and char:FindFirstChildOfClass("Humanoid")
 	local hrp = char and char:FindFirstChild("HumanoidRootPart")
-	if not (hum and hrp) then
-		exitCar()
-		return
+	if not (hum and hrp) then exitCar(); return end
+
+	for _, r in ipairs(activeRotors) do
+		if r.part and r.part.Parent then
+			local ang = math.rad(r.speed * 360 * dt)
+			if r.axis == "y" then
+				r.part.CFrame = r.part.CFrame * CFrame.Angles(0, ang, 0)
+			elseif r.axis == "x" then
+				r.part.CFrame = r.part.CFrame * CFrame.Angles(ang, 0, 0)
+			elseif r.axis == "z" then
+				r.part.CFrame = r.part.CFrame * CFrame.Angles(0, 0, ang)
+			end
+		end
 	end
 
-	-- Ввод: клавиатура + кнопки
 	local throttle = 0
 	if UserInputService:IsKeyDown(Enum.KeyCode.W) or carBtnForward then throttle = 1 end
 	if UserInputService:IsKeyDown(Enum.KeyCode.S) or carBtnBackward then throttle = -1 end
@@ -443,22 +483,40 @@ local carDriveConnection = RunService.Heartbeat:Connect(function(dt)
 	if UserInputService:IsKeyDown(Enum.KeyCode.A) or carBtnLeft then turn = 1 end
 	if UserInputService:IsKeyDown(Enum.KeyCode.D) or carBtnRight then turn = -1 end
 
+	local vertical = 0
+	if activeVehicleCanFly then
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) or carBtnVertUp then vertical = 1 end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) or carBtnVertDown then vertical = -1 end
+	end
+
+	local maxSpeed = activeVehicleCanFly and FLY_MAX_SPEED or CAR_MAX_SPEED
+	local accel = activeVehicleCanFly and FLY_ACCEL or CAR_ACCEL
+
 	if throttle ~= 0 then
-		carSpeed = carSpeed + throttle * CAR_ACCEL * dt
+		carSpeed = carSpeed + throttle * accel * dt
 	else
 		carSpeed = carSpeed * (1 - 3.5 * dt)
 		if math.abs(carSpeed) < 0.3 then carSpeed = 0 end
 	end
-	carSpeed = math.clamp(carSpeed, -CAR_MAX_SPEED * 0.4, CAR_MAX_SPEED)
+	carSpeed = math.clamp(carSpeed, -maxSpeed * 0.4, maxSpeed)
 
 	local turnAmount = 0
-	if math.abs(carSpeed) > 1 then
-		turnAmount = turn * CAR_TURN_SPEED * dt * (carSpeed > 0 and 1 or -1)
+	if activeVehicleCanFly then
+		turnAmount = turn * CAR_TURN_SPEED * dt * 0.9
+	else
+		if math.abs(carSpeed) > 1 then
+			turnAmount = turn * CAR_TURN_SPEED * dt * (carSpeed > 0 and 1 or -1)
+		end
 	end
 
 	local pivot = activeCar:GetPivot()
 	pivot = pivot * CFrame.Angles(0, turnAmount, 0)
 	pivot = pivot + pivot.LookVector * carSpeed * dt
+
+	if activeVehicleCanFly and vertical ~= 0 then
+		pivot = pivot + Vector3.new(0, vertical * FLY_VERTICAL_SPEED * dt, 0)
+	end
+
 	activeCar:PivotTo(pivot)
 
 	hrp.CFrame = seat.CFrame * CFrame.new(0, 1.2, 0)
@@ -473,7 +531,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 	end
 end)
 
--- ================== ОСНОВНОЕ МЕНЮ ==================
+-- ================== МЕНЮ ==================
 function createMainMenu()
 	mainFrame = Instance.new("Frame")
 	mainFrame.Size = UDim2.new(0, 340, 0, 380)
@@ -911,91 +969,546 @@ function createMainMenu()
 		end
 	end)
 
-	-- TRANSPORT TAB
+	-- ================== TRANSPORT TAB ==================
 	local transportTitle = Instance.new("TextLabel")
-	transportTitle.Size = UDim2.new(1, 0, 0, 16)
+	transportTitle.Size = UDim2.new(1, 0, 0, 18)
 	transportTitle.BackgroundTransparency = 1
 	transportTitle.Text = "Транспорт"
 	transportTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 	transportTitle.Font = Enum.Font.GothamBold
-	transportTitle.TextSize = 13
+	transportTitle.TextSize = 14
 	transportTitle.TextXAlignment = Enum.TextXAlignment.Left
 	transportTitle.ZIndex = 3
 	transportTitle.Parent = transportTabContent
 
-	local spawnCustomCarBtn = Instance.new("TextButton")
-	spawnCustomCarBtn.Size = UDim2.new(1, 0, 0, 40)
-	spawnCustomCarBtn.Position = UDim2.new(0, 0, 0, 26)
-	spawnCustomCarBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 220)
-	spawnCustomCarBtn.BorderSizePixel = 0
-	spawnCustomCarBtn.Text = "🚗 Спавн машины"
-	spawnCustomCarBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	spawnCustomCarBtn.Font = Enum.Font.GothamBold
-	spawnCustomCarBtn.TextSize = 13
-	spawnCustomCarBtn.ZIndex = 3
-	Instance.new("UICorner", spawnCustomCarBtn).CornerRadius = UDim.new(0, 6)
-	spawnCustomCarBtn.Parent = transportTabContent
+	local exitCarBtn2 = Instance.new("TextButton")
+	exitCarBtn2.Size = UDim2.new(0, 78, 0, 22)
+	exitCarBtn2.Position = UDim2.new(1, -78, 0, -2)
+	exitCarBtn2.BackgroundColor3 = Color3.fromRGB(160, 50, 60)
+	exitCarBtn2.BorderSizePixel = 0
+	exitCarBtn2.Text = "Выйти (E)"
+	exitCarBtn2.TextColor3 = Color3.fromRGB(255, 255, 255)
+	exitCarBtn2.Font = Enum.Font.GothamBold
+	exitCarBtn2.TextSize = 10
+	exitCarBtn2.ZIndex = 4
+	Instance.new("UICorner", exitCarBtn2).CornerRadius = UDim.new(0, 6)
+	exitCarBtn2.Parent = transportTabContent
 
-	local exitCarBtn = Instance.new("TextButton")
-	exitCarBtn.Size = UDim2.new(1, 0, 0, 32)
-	exitCarBtn.Position = UDim2.new(0, 0, 0, 70)
-	exitCarBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
-	exitCarBtn.BorderSizePixel = 0
-	exitCarBtn.Text = "🚪 Выйти из машины (E)"
-	exitCarBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	exitCarBtn.Font = Enum.Font.GothamBold
-	exitCarBtn.TextSize = 12
-	exitCarBtn.ZIndex = 3
-	Instance.new("UICorner", exitCarBtn).CornerRadius = UDim.new(0, 6)
-	exitCarBtn.Parent = transportTabContent
-
-	exitCarBtn.MouseButton1Click:Connect(function()
+	exitCarBtn2.MouseButton1Click:Connect(function()
 		if driving then exitCar() end
 	end)
 
+	-- Векторные иконки
+	local function drawCarIcon(parent, color)
+		local f = Instance.new("Frame")
+		f.Size = UDim2.new(1, -20, 0, 20)
+		f.Position = UDim2.new(0, 10, 0.5, -10)
+		f.BackgroundColor3 = color
+		f.BorderSizePixel = 0
+		f.ZIndex = 5
+		Instance.new("UICorner", f).CornerRadius = UDim.new(0, 3)
+		f.Parent = parent
+
+		local cabin = Instance.new("Frame")
+		cabin.Size = UDim2.new(0.55, 0, 0.5, 0)
+		cabin.Position = UDim2.new(0.2, 0, -0.45, 0)
+		cabin.BackgroundColor3 = color
+		cabin.BorderSizePixel = 0
+		cabin.ZIndex = 5
+		Instance.new("UICorner", cabin).CornerRadius = UDim.new(0, 2)
+		cabin.Parent = f
+	end
+
+	local function drawGelikIcon(parent, color)
+		local f = Instance.new("Frame")
+		f.Size = UDim2.new(1, -20, 0, 22)
+		f.Position = UDim2.new(0, 10, 0.5, -11)
+		f.BackgroundColor3 = color
+		f.BorderSizePixel = 0
+		f.ZIndex = 5
+		Instance.new("UICorner", f).CornerRadius = UDim.new(0, 2)
+		f.Parent = parent
+
+		local cabin = Instance.new("Frame")
+		cabin.Size = UDim2.new(0.7, 0, 0.6, 0)
+		cabin.Position = UDim2.new(0.15, 0, -0.55, 0)
+		cabin.BackgroundColor3 = color
+		cabin.BorderSizePixel = 0
+		cabin.ZIndex = 5
+		Instance.new("UICorner", cabin).CornerRadius = UDim.new(0, 2)
+		cabin.Parent = f
+	end
+
+	local function drawTruckIcon(parent, color)
+		local f = Instance.new("Frame")
+		f.Size = UDim2.new(1, -20, 0, 18)
+		f.Position = UDim2.new(0, 10, 0.5, -6)
+		f.BackgroundColor3 = color
+		f.BorderSizePixel = 0
+		f.ZIndex = 5
+		Instance.new("UICorner", f).CornerRadius = UDim.new(0, 2)
+		f.Parent = parent
+
+		local cabin = Instance.new("Frame")
+		cabin.Size = UDim2.new(0.28, 0, 0.7, 0)
+		cabin.Position = UDim2.new(0, 0, -0.65, 0)
+		cabin.BackgroundColor3 = color
+		cabin.BorderSizePixel = 0
+		cabin.ZIndex = 5
+		Instance.new("UICorner", cabin).CornerRadius = UDim.new(0, 2)
+		cabin.Parent = f
+	end
+
+	local function drawTankIcon(parent, color)
+		local base = Instance.new("Frame")
+		base.Size = UDim2.new(1, -20, 0, 14)
+		base.Position = UDim2.new(0, 10, 0.5, -2)
+		base.BackgroundColor3 = color
+		base.BorderSizePixel = 0
+		base.ZIndex = 5
+		Instance.new("UICorner", base).CornerRadius = UDim.new(0, 2)
+		base.Parent = parent
+
+		local turret = Instance.new("Frame")
+		turret.Size = UDim2.new(0.45, 0, 0.45, 0)
+		turret.Position = UDim2.new(0.2, 0, -0.55, 0)
+		turret.BackgroundColor3 = color
+		turret.BorderSizePixel = 0
+		turret.ZIndex = 5
+		Instance.new("UICorner", turret).CornerRadius = UDim.new(0, 2)
+		turret.Parent = base
+
+		local barrel = Instance.new("Frame")
+		barrel.Size = UDim2.new(0.55, 0, 0.25, 0)
+		barrel.Position = UDim2.new(1, 0, 0.35, 0)
+		barrel.BackgroundColor3 = color
+		barrel.BorderSizePixel = 0
+		barrel.ZIndex = 6
+		Instance.new("UICorner", barrel).CornerRadius = UDim.new(0, 1)
+		barrel.Parent = turret
+	end
+
+	local function drawHeliIcon(parent, color)
+		local body = Instance.new("Frame")
+		body.Size = UDim2.new(0.7, 0, 0, 18)
+		body.Position = UDim2.new(0.15, 0, 0.5, -4)
+		body.BackgroundColor3 = color
+		body.BorderSizePixel = 0
+		body.ZIndex = 5
+		Instance.new("UICorner", body).CornerRadius = UDim.new(0, 4)
+		body.Parent = parent
+
+		local tail = Instance.new("Frame")
+		tail.Size = UDim2.new(0.3, 0, 0, 4)
+		tail.Position = UDim2.new(0.7, 0, 0.5, 0)
+		tail.BackgroundColor3 = color
+		tail.BorderSizePixel = 0
+		tail.ZIndex = 5
+		Instance.new("UICorner", tail).CornerRadius = UDim.new(0, 1)
+		tail.Parent = parent
+
+		local rotor = Instance.new("Frame")
+		rotor.Size = UDim2.new(0.85, 0, 0, 2)
+		rotor.Position = UDim2.new(0.075, 0, 0.5, -16)
+		rotor.BackgroundColor3 = color
+		rotor.BorderSizePixel = 0
+		rotor.ZIndex = 5
+		Instance.new("UICorner", rotor).CornerRadius = UDim.new(1, 0)
+		rotor.Parent = parent
+
+		local pole = Instance.new("Frame")
+		pole.Size = UDim2.new(0, 2, 0, 8)
+		pole.Position = UDim2.new(0.5, -1, 0.5, -10)
+		pole.BackgroundColor3 = color
+		pole.BorderSizePixel = 0
+		pole.ZIndex = 5
+		pole.Parent = parent
+	end
+
+	local function drawPlaneIcon(parent, color)
+		local body = Instance.new("Frame")
+		body.Size = UDim2.new(0.7, 0, 0, 8)
+		body.Position = UDim2.new(0.15, 0, 0.5, -4)
+		body.BackgroundColor3 = color
+		body.BorderSizePixel = 0
+		body.ZIndex = 5
+		Instance.new("UICorner", body).CornerRadius = UDim.new(1, 0)
+		body.Parent = parent
+
+		local wing = Instance.new("Frame")
+		wing.Size = UDim2.new(0.9, 0, 0, 4)
+		wing.Position = UDim2.new(0.05, 0, 0.5, 1)
+		wing.BackgroundColor3 = color
+		wing.BorderSizePixel = 0
+		wing.ZIndex = 5
+		Instance.new("UICorner", wing).CornerRadius = UDim.new(0, 1)
+		wing.Parent = parent
+
+		local tailWing = Instance.new("Frame")
+		tailWing.Size = UDim2.new(0, 2, 0, 12)
+		tailWing.Position = UDim2.new(0.78, 0, 0.5, -6)
+		tailWing.BackgroundColor3 = color
+		tailWing.BorderSizePixel = 0
+		tailWing.ZIndex = 5
+		tailWing.Parent = parent
+	end
+
+	local VEHICLE_LIST = {
+		{key="car",        label="Car",   desc="Быстрая легковушка", grad1=Color3.fromRGB(220, 70, 80),  grad2=Color3.fromRGB(140, 30, 40),   canFly=false, draw=drawCarIcon},
+		{key="gelik",      label="Gelik", desc="Чёрный внедорожник", grad1=Color3.fromRGB(60, 65, 80),   grad2=Color3.fromRGB(20, 22, 30),    canFly=false, draw=drawGelikIcon},
+		{key="truck",      label="Truck", desc="Тяжёлый грузовик",   grad1=Color3.fromRGB(90, 140, 220), grad2=Color3.fromRGB(40, 70, 160),   canFly=false, draw=drawTruckIcon},
+		{key="tank",       label="Tank",  desc="Бронированный танк", grad1=Color3.fromRGB(120, 160, 100),grad2=Color3.fromRGB(60, 90, 50),    canFly=false, draw=drawTankIcon},
+		{key="helicopter", label="Heli",  desc="Вертолёт (летает)",  grad1=Color3.fromRGB(100, 170, 240),grad2=Color3.fromRGB(40, 90, 180),   canFly=true,  draw=drawHeliIcon},
+		{key="plane",      label="Plane", desc="Самолёт (летает)",   grad1=Color3.fromRGB(230, 230, 240),grad2=Color3.fromRGB(150, 160, 190), canFly=true,  draw=drawPlaneIcon},
+	}
+
+	local cards = {}
+
+	-- Forward declare locals that updateInfoPanel will use
+	local infoAccent, infoName, infoDesc, infoTag
+	local selectedInfo
+
+	local function updateCardStyles()
+		for key, data in pairs(cards) do
+			local isSelected = (key == selectedVehicleType)
+			TweenService:Create(data.outerStroke, TweenInfo.new(0.2), {
+				Color = isSelected and data.v.grad1 or Color3.fromRGB(45, 60, 100),
+				Thickness = isSelected and 2 or 1,
+				Transparency = isSelected and 0 or 0.55,
+			}):Play()
+			TweenService:Create(data.checkBg, TweenInfo.new(0.2), {
+				BackgroundTransparency = isSelected and 0 or 1,
+			}):Play()
+			TweenService:Create(data.checkMark, TweenInfo.new(0.2), {
+				TextTransparency = isSelected and 0 or 1,
+			}):Play()
+			TweenService:Create(data.nameLabel, TweenInfo.new(0.2), {
+				TextColor3 = isSelected and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(150, 175, 220),
+			}):Play()
+			TweenService:Create(data.iconFrame, TweenInfo.new(0.2), {
+				BackgroundTransparency = isSelected and 0.7 or 0.9,
+			}):Play()
+		end
+	end
+
+	local function updateInfoPanel()
+		for _, v in ipairs(VEHICLE_LIST) do
+			if v.key == selectedVehicleType then
+				selectedInfo = v
+				break
+			end
+		end
+		if not selectedInfo or not infoAccent then return end
+
+		TweenService:Create(infoAccent, TweenInfo.new(0.25), {
+			BackgroundColor3 = selectedInfo.grad1,
+		}):Play()
+
+		infoName.Text = selectedInfo.label
+		infoDesc.Text = selectedInfo.desc
+		if selectedInfo.canFly then
+			infoTag.Text = "ЛЕТАЕТ"
+			infoTag.BackgroundColor3 = Color3.fromRGB(70, 190, 120)
+		else
+			infoTag.Text = "НАЗЕМНЫЙ"
+			infoTag.BackgroundColor3 = Color3.fromRGB(70, 120, 200)
+		end
+	end
+
+	local gridFrame = Instance.new("Frame")
+	gridFrame.Size = UDim2.new(1, 0, 0, 160)
+	gridFrame.Position = UDim2.new(0, 0, 0, 24)
+	gridFrame.BackgroundTransparency = 1
+	gridFrame.ZIndex = 3
+	gridFrame.Parent = transportTabContent
+
+	local CARD_W = 79
+	local CARD_H = 76
+	local GAP = 4
+
+	for i, v in ipairs(VEHICLE_LIST) do
+		local col = (i - 1) % 2
+		local row = math.floor((i - 1) / 2)
+
+		local card = Instance.new("TextButton")
+		card.Size = UDim2.new(0, CARD_W, 0, CARD_H)
+		card.Position = UDim2.new(0, col * (CARD_W + GAP), 0, row * (CARD_H + GAP))
+		card.BackgroundColor3 = Color3.fromRGB(20, 28, 50)
+		card.BorderSizePixel = 0
+		card.Text = ""
+		card.AutoButtonColor = false
+		card.ZIndex = 3
+		Instance.new("UICorner", card).CornerRadius = UDim.new(0, 10)
+		card.Parent = gridFrame
+
+		local cardGrad = Instance.new("UIGradient")
+		cardGrad.Color = ColorSequence.new{
+			ColorSequenceKeypoint.new(0, v.grad1),
+			ColorSequenceKeypoint.new(1, v.grad2),
+		}
+		cardGrad.Rotation = 135
+		cardGrad.Transparency = NumberSequence.new{
+			NumberSequenceKeypoint.new(0, 0.55),
+			NumberSequenceKeypoint.new(1, 0.88),
+		}
+		cardGrad.Parent = card
+
+		local outerStroke = Instance.new("UIStroke")
+		outerStroke.Color = Color3.fromRGB(45, 60, 100)
+		outerStroke.Thickness = 1
+		outerStroke.Transparency = 0.55
+		outerStroke.Parent = card
+
+		local iconFrame = Instance.new("Frame")
+		iconFrame.Size = UDim2.new(1, -12, 0, 40)
+		iconFrame.Position = UDim2.new(0, 6, 0, 4)
+		iconFrame.BackgroundColor3 = Color3.fromRGB(10, 15, 30)
+		iconFrame.BackgroundTransparency = 0.9
+		iconFrame.BorderSizePixel = 0
+		iconFrame.ZIndex = 4
+		Instance.new("UICorner", iconFrame).CornerRadius = UDim.new(0, 6)
+		iconFrame.Parent = card
+
+		v.draw(iconFrame, Color3.fromRGB(230, 240, 255))
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(1, 0, 0, 18)
+		nameLabel.Position = UDim2.new(0, 0, 1, -22)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = v.label
+		nameLabel.TextColor3 = Color3.fromRGB(150, 175, 220)
+		nameLabel.Font = Enum.Font.GothamBold
+		nameLabel.TextSize = 11
+		nameLabel.ZIndex = 5
+		nameLabel.Parent = card
+
+		local dot = Instance.new("Frame")
+		dot.Size = UDim2.new(0, 6, 0, 6)
+		dot.Position = UDim2.new(1, -11, 0, 5)
+		dot.BackgroundColor3 = v.canFly and Color3.fromRGB(90, 230, 140) or Color3.fromRGB(90, 140, 220)
+		dot.BorderSizePixel = 0
+		dot.ZIndex = 6
+		Instance.new("UICorner", dot).CornerRadius = UDim.new(1, 0)
+		dot.Parent = card
+
+		local checkBg = Instance.new("Frame")
+		checkBg.Size = UDim2.new(0, 18, 0, 18)
+		checkBg.Position = UDim2.new(0, 4, 0, 4)
+		checkBg.BackgroundColor3 = v.grad1
+		checkBg.BackgroundTransparency = 1
+		checkBg.BorderSizePixel = 0
+		checkBg.ZIndex = 7
+		Instance.new("UICorner", checkBg).CornerRadius = UDim.new(1, 0)
+		checkBg.Parent = card
+
+		local checkMark = Instance.new("TextLabel")
+		checkMark.Size = UDim2.new(1, 0, 1, 0)
+		checkMark.BackgroundTransparency = 1
+		checkMark.Text = "✓"
+		checkMark.TextColor3 = Color3.fromRGB(255, 255, 255)
+		checkMark.Font = Enum.Font.GothamBold
+		checkMark.TextSize = 12
+		checkMark.TextTransparency = 1
+		checkMark.ZIndex = 8
+		checkMark.Parent = checkBg
+
+		cards[v.key] = {
+			frame = card,
+			outerStroke = outerStroke,
+			nameLabel = nameLabel,
+			iconFrame = iconFrame,
+			checkBg = checkBg,
+			checkMark = checkMark,
+			v = v,
+		}
+
+		card.MouseEnter:Connect(function()
+			if selectedVehicleType ~= v.key then
+				TweenService:Create(card, TweenInfo.new(0.15), {
+					BackgroundColor3 = Color3.fromRGB(30, 42, 72),
+				}):Play()
+			end
+		end)
+		card.MouseLeave:Connect(function()
+			if selectedVehicleType ~= v.key then
+				TweenService:Create(card, TweenInfo.new(0.15), {
+					BackgroundColor3 = Color3.fromRGB(20, 28, 50),
+				}):Play()
+			end
+		end)
+
+		card.MouseButton1Click:Connect(function()
+			selectedVehicleType = v.key
+			updateCardStyles()
+			updateInfoPanel()
+
+			local pulse = Instance.new("Frame")
+			pulse.Size = UDim2.new(1, 0, 1, 0)
+			pulse.BackgroundColor3 = v.grad1
+			pulse.BackgroundTransparency = 0.7
+			pulse.BorderSizePixel = 0
+			pulse.ZIndex = 20
+			Instance.new("UICorner", pulse).CornerRadius = UDim.new(0, 10)
+			pulse.Parent = card
+			TweenService:Create(pulse, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(1, 12, 1, 12),
+				Position = UDim2.new(0, -6, 0, -6),
+			}):Play()
+			task.delay(0.45, function() pulse:Destroy() end)
+		end)
+	end
+
+	-- Инфо-панель
+	local infoPanel = Instance.new("Frame")
+	infoPanel.Size = UDim2.new(1, 0, 0, 56)
+	infoPanel.Position = UDim2.new(0, 0, 0, 190)
+	infoPanel.BackgroundColor3 = Color3.fromRGB(16, 22, 44)
+	infoPanel.BorderSizePixel = 0
+	infoPanel.ZIndex = 3
+	Instance.new("UICorner", infoPanel).CornerRadius = UDim.new(0, 10)
+	infoPanel.Parent = transportTabContent
+
+	local infoStroke = Instance.new("UIStroke")
+	infoStroke.Color = Color3.fromRGB(45, 70, 130)
+	infoStroke.Thickness = 1
+	infoStroke.Transparency = 0.5
+	infoStroke.Parent = infoPanel
+
+	infoAccent = Instance.new("Frame")
+	infoAccent.Size = UDim2.new(0, 4, 1, -12)
+	infoAccent.Position = UDim2.new(0, 6, 0, 6)
+	infoAccent.BackgroundColor3 = Color3.fromRGB(220, 70, 80)
+	infoAccent.BorderSizePixel = 0
+	infoAccent.ZIndex = 4
+	Instance.new("UICorner", infoAccent).CornerRadius = UDim.new(0, 2)
+	infoAccent.Parent = infoPanel
+
+	infoName = Instance.new("TextLabel")
+	infoName.Size = UDim2.new(1, -90, 0, 18)
+	infoName.Position = UDim2.new(0, 18, 0, 10)
+	infoName.BackgroundTransparency = 1
+	infoName.Text = "Car"
+	infoName.TextColor3 = Color3.fromRGB(255, 255, 255)
+	infoName.Font = Enum.Font.GothamBold
+	infoName.TextSize = 14
+	infoName.TextXAlignment = Enum.TextXAlignment.Left
+	infoName.ZIndex = 4
+	infoName.Parent = infoPanel
+
+	infoDesc = Instance.new("TextLabel")
+	infoDesc.Size = UDim2.new(1, -90, 0, 14)
+	infoDesc.Position = UDim2.new(0, 18, 0, 30)
+	infoDesc.BackgroundTransparency = 1
+	infoDesc.Text = "Быстрая легковушка"
+	infoDesc.TextColor3 = Color3.fromRGB(140, 165, 210)
+	infoDesc.Font = Enum.Font.Gotham
+	infoDesc.TextSize = 10
+	infoDesc.TextXAlignment = Enum.TextXAlignment.Left
+	infoDesc.ZIndex = 4
+	infoDesc.Parent = infoPanel
+
+	infoTag = Instance.new("TextLabel")
+	infoTag.Size = UDim2.new(0, 62, 0, 16)
+	infoTag.Position = UDim2.new(1, -68, 0, 8)
+	infoTag.BackgroundColor3 = Color3.fromRGB(70, 120, 200)
+	infoTag.BorderSizePixel = 0
+	infoTag.Text = "НАЗЕМНЫЙ"
+	infoTag.TextColor3 = Color3.fromRGB(255, 255, 255)
+	infoTag.Font = Enum.Font.GothamBold
+	infoTag.TextSize = 8
+	infoTag.ZIndex = 4
+	Instance.new("UICorner", infoTag).CornerRadius = UDim.new(0, 4)
+	infoTag.Parent = infoPanel
+
+	-- Кнопка спавна
+	local spawnCustomCarBtn = Instance.new("TextButton")
+	spawnCustomCarBtn.Size = UDim2.new(1, 0, 0, 42)
+	spawnCustomCarBtn.Position = UDim2.new(0, 0, 0, 254)
+	spawnCustomCarBtn.BackgroundColor3 = Color3.fromRGB(45, 100, 220)
+	spawnCustomCarBtn.BorderSizePixel = 0
+	spawnCustomCarBtn.Text = "ЗАСПАВНИТЬ"
+	spawnCustomCarBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	spawnCustomCarBtn.Font = Enum.Font.GothamBold
+	spawnCustomCarBtn.TextSize = 14
+	spawnCustomCarBtn.AutoButtonColor = false
+	spawnCustomCarBtn.ZIndex = 3
+	Instance.new("UICorner", spawnCustomCarBtn).CornerRadius = UDim.new(0, 10)
+	spawnCustomCarBtn.Parent = transportTabContent
+
+	local btnGradient = Instance.new("UIGradient")
+	btnGradient.Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(70, 140, 250)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(40, 80, 200)),
+	}
+	btnGradient.Rotation = 90
+	btnGradient.Parent = spawnCustomCarBtn
+
+	local spawnStroke = Instance.new("UIStroke")
+	spawnStroke.Color = Color3.fromRGB(140, 190, 255)
+	spawnStroke.Thickness = 1
+	spawnStroke.Transparency = 0.55
+	spawnStroke.Parent = spawnCustomCarBtn
+
+	spawnCustomCarBtn.MouseEnter:Connect(function()
+		TweenService:Create(spawnStroke, TweenInfo.new(0.15), {
+			Transparency = 0.15,
+			Thickness = 2,
+		}):Play()
+	end)
+	spawnCustomCarBtn.MouseLeave:Connect(function()
+		TweenService:Create(spawnStroke, TweenInfo.new(0.15), {
+			Transparency = 0.55,
+			Thickness = 1,
+		}):Play()
+	end)
+
 	local statusLabel = Instance.new("TextLabel")
-	statusLabel.Size = UDim2.new(1, 0, 0, 100)
-	statusLabel.Position = UDim2.new(0, 0, 0, 110)
+	statusLabel.Size = UDim2.new(1, 0, 0, 60)
+	statusLabel.Position = UDim2.new(0, 0, 0, 300)
 	statusLabel.BackgroundTransparency = 1
-	statusLabel.Text = "W/S — газ и назад\nA/D — поворот\nE — выйти\n\nПоявятся кнопки управления на экране."
-	statusLabel.TextColor3 = Color3.fromRGB(180, 200, 255)
+	statusLabel.Text = "W/S — газ/назад    A/D — поворот\nSpace/Shift — вверх/вниз (для летающих)\nE — выйти"
+	statusLabel.TextColor3 = Color3.fromRGB(130, 155, 200)
 	statusLabel.Font = Enum.Font.Gotham
-	statusLabel.TextSize = 10
+	statusLabel.TextSize = 9
 	statusLabel.TextXAlignment = Enum.TextXAlignment.Left
 	statusLabel.TextYAlignment = Enum.TextYAlignment.Top
 	statusLabel.TextWrapped = true
 	statusLabel.ZIndex = 3
 	statusLabel.Parent = transportTabContent
 
+	updateCardStyles()
+	updateInfoPanel()
+
 	spawnCustomCarBtn.MouseButton1Click:Connect(function()
 		if driving then
-			statusLabel.Text = "⚠ Ты уже за рулём. Нажми E чтобы выйти."
+			statusLabel.Text = "Уже за рулём. Нажми E чтобы выйти."
 			statusLabel.TextColor3 = Color3.fromRGB(255, 220, 120)
 			return
 		end
 
 		statusLabel.TextColor3 = Color3.fromRGB(180, 200, 255)
-		statusLabel.Text = "Строим машину..."
+		statusLabel.Text = "Создаём " .. (selectedInfo and selectedInfo.label or "транспорт") .. "..."
 
-		local ok, car, seat = pcall(buildCustomCar)
+		local ok, car, seat, canFly, rotors = pcall(buildVehicle, selectedVehicleType)
 		if not ok then
-			statusLabel.Text = "✗ Ошибка: " .. tostring(car)
+			statusLabel.Text = "Ошибка: " .. tostring(car)
 			statusLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
-			warn("[Car] " .. tostring(car))
+			warn("[Vehicle] " .. tostring(car))
 			return
 		end
 		if not car then
-			statusLabel.Text = "✗ " .. (seat or "неизвестная ошибка")
+			statusLabel.Text = tostring(seat or "неизвестная ошибка")
 			statusLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
 			return
 		end
 
-		local entered = enterCar(car, seat)
+		local entered = enterCar(car, seat, canFly, rotors)
 		if entered then
-			statusLabel.Text = "✓ Ты за рулём!\nW/S — газ/назад, A/D — поворот, E — выйти.\nИли используй кнопки на экране."
+			statusLabel.Text = (selectedInfo and selectedInfo.label or "Транспорт") .. " готов!\nW/S — газ, A/D — руль" .. (canFly and "\nSpace/Shift — вверх/вниз" or "") .. "\nE — выйти"
 			statusLabel.TextColor3 = Color3.fromRGB(120, 255, 140)
 		else
-			statusLabel.Text = "⚠ Машина создана, но сесть не удалось."
+			statusLabel.Text = "Транспорт создан, но сесть не удалось."
 			statusLabel.TextColor3 = Color3.fromRGB(255, 220, 120)
 		end
 	end)
@@ -1028,7 +1541,7 @@ function createMainMenu()
 	local forwardPressed, backwardPressed, upPressed, downPressed = false, false, false, false
 	local noclipEnabled = false
 
-	-- ФАБРИКИ UI
+	-- ФАБРИКИ
 	local function createSlider(name, desc, minVal, maxVal, defaultVal, positionY, parent)
 		local group = Instance.new("Frame")
 		group.Size = UDim2.new(1, 0, 0, 40)
@@ -1533,10 +2046,10 @@ function createMainMenu()
 	espSettingsBtn.Position = UDim2.new(1, -64, 0, 7)
 	espSettingsBtn.BackgroundColor3 = Color3.fromRGB(80, 110, 180)
 	espSettingsBtn.BorderSizePixel = 0
-	espSettingsBtn.Text = "⚙"
+	espSettingsBtn.Text = "*"
 	espSettingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 	espSettingsBtn.Font = Enum.Font.GothamBold
-	espSettingsBtn.TextSize = 13
+	espSettingsBtn.TextSize = 14
 	espSettingsBtn.ZIndex = 6
 	Instance.new("UICorner", espSettingsBtn).CornerRadius = UDim.new(0, 4)
 	espSettingsBtn.Parent = espToggle.Group
