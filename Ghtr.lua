@@ -100,9 +100,11 @@ keyButton.MouseButton1Click:Connect(function()
 	local ok, err = pcall(createMainMenu)
 	if ok then
 		keyFrame:Destroy()
+		print("[Helper Farm] Меню успешно загружено")
 	else
 		keyError.Text = "Ошибка: " .. tostring(err):sub(1, 80)
 		warn("[Helper Farm] " .. tostring(err))
+		print("[Helper Farm] Полный traceback:")
 		print(debug.traceback())
 	end
 end)
@@ -534,6 +536,216 @@ end)
 
 -- ================== МЕНЮ ==================
 function createMainMenu()
+	-- Форвард-декларации всех функций, которые будут вызываться до своего объявления
+	local startFly, stopFly, createFlyParts, createMobileControls
+	local createSlider, createToggle
+
+	-- ================== ФАБРИКИ (создаём их ПЕРВЫМИ) ==================
+	createSlider = function(name, desc, minVal, maxVal, defaultVal, positionY, parent)
+		local group = Instance.new("Frame")
+		group.Size = UDim2.new(1, 0, 0, 40)
+		group.Position = UDim2.new(0, 0, 0, positionY)
+		group.BackgroundTransparency = 1
+		group.ZIndex = 3
+		group.Parent = parent
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(1, 0, 0, 14)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = name
+		nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		nameLabel.Font = Enum.Font.GothamSemibold
+		nameLabel.TextSize = 12
+		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+		nameLabel.ZIndex = 3
+		nameLabel.Parent = group
+
+		local descLabel = Instance.new("TextLabel")
+		descLabel.Size = UDim2.new(1, 0, 0, 11)
+		descLabel.Position = UDim2.new(0, 0, 0, 14)
+		descLabel.BackgroundTransparency = 1
+		descLabel.Text = desc
+		descLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+		descLabel.Font = Enum.Font.Gotham
+		descLabel.TextSize = 9
+		descLabel.TextXAlignment = Enum.TextXAlignment.Left
+		descLabel.ZIndex = 3
+		descLabel.Parent = group
+
+		local track = Instance.new("Frame")
+		track.Size = UDim2.new(1, -44, 0, 6)
+		track.Position = UDim2.new(0, 0, 0, 28)
+		track.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+		track.BorderSizePixel = 0
+		track.ZIndex = 3
+		Instance.new("UICorner", track).CornerRadius = UDim.new(0, 3)
+		track.Parent = group
+
+		local fill = Instance.new("Frame")
+		fill.Size = UDim2.new(0, 0, 1, 0)
+		fill.BackgroundColor3 = Color3.fromRGB(50, 100, 220)
+		fill.BorderSizePixel = 0
+		fill.ZIndex = 4
+		Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
+		fill.Parent = track
+
+		local thumb = Instance.new("Frame")
+		thumb.Size = UDim2.new(0, 12, 0, 12)
+		thumb.AnchorPoint = Vector2.new(0.5, 0.5)
+		thumb.Position = UDim2.new(0, 0, 0.5, 0)
+		thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		thumb.BorderSizePixel = 0
+		thumb.ZIndex = 5
+		Instance.new("UICorner", thumb).CornerRadius = UDim.new(0, 6)
+		thumb.Parent = track
+
+		local sliderButton = Instance.new("TextButton")
+		sliderButton.Size = UDim2.new(1, 0, 1, 0)
+		sliderButton.BackgroundTransparency = 1
+		sliderButton.Text = ""
+		sliderButton.ZIndex = 6
+		sliderButton.Parent = track
+
+		local valueLabel = Instance.new("TextLabel")
+		valueLabel.Size = UDim2.new(0, 38, 0, 14)
+		valueLabel.Position = UDim2.new(1, -38, 0, 28)
+		valueLabel.BackgroundTransparency = 1
+		valueLabel.Text = tostring(defaultVal)
+		valueLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		valueLabel.Font = Enum.Font.GothamBold
+		valueLabel.TextSize = 11
+		valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+		valueLabel.ZIndex = 3
+		valueLabel.Parent = group
+
+		local currentValue = defaultVal
+		local dragCallback = nil
+		local sliderDragging = false
+
+		local function updateVisual()
+			local fraction = (currentValue - minVal) / (maxVal - minVal)
+			fill.Size = UDim2.new(fraction, 0, 1, 0)
+			thumb.Position = UDim2.new(fraction, 0, 0.5, 0)
+			valueLabel.Text = tostring(currentValue)
+		end
+		updateVisual()
+
+		local function computeValue(inputX)
+			local trackWidth = track.AbsoluteSize.X
+			if trackWidth <= 0 then return end
+			local relX = inputX - track.AbsolutePosition.X
+			local fraction = math.clamp(relX / trackWidth, 0, 1)
+			currentValue = math.clamp(math.floor(minVal + fraction * (maxVal - minVal) + 0.5), minVal, maxVal)
+			updateVisual()
+			if dragCallback then dragCallback(currentValue) end
+		end
+
+		sliderButton.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				sliderDragging = true
+				computeValue(input.Position.X)
+			end
+		end)
+
+		UserInputService.InputChanged:Connect(function(input)
+			if sliderDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+				computeValue(input.Position.X)
+			end
+		end)
+
+		UserInputService.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				sliderDragging = false
+			end
+		end)
+
+		return {
+			GetValue = function() return currentValue end,
+			SetValue = function(val) currentValue = val; updateVisual() end,
+			OnDrag = function(cb) dragCallback = cb end
+		}
+	end
+
+	createToggle = function(name, desc, positionY, parent)
+		local group = Instance.new("Frame")
+		group.Size = UDim2.new(1, 0, 0, 34)
+		group.Position = UDim2.new(0, 0, 0, positionY)
+		group.BackgroundTransparency = 1
+		group.ZIndex = 3
+		group.Parent = parent
+
+		local nameLabel = Instance.new("TextLabel")
+		nameLabel.Size = UDim2.new(1, -46, 0, 14)
+		nameLabel.BackgroundTransparency = 1
+		nameLabel.Text = name
+		nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+		nameLabel.Font = Enum.Font.GothamSemibold
+		nameLabel.TextSize = 12
+		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+		nameLabel.ZIndex = 3
+		nameLabel.Parent = group
+
+		local descLabel = Instance.new("TextLabel")
+		descLabel.Size = UDim2.new(1, -46, 0, 11)
+		descLabel.Position = UDim2.new(0, 0, 0, 14)
+		descLabel.BackgroundTransparency = 1
+		descLabel.Text = desc
+		descLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+		descLabel.Font = Enum.Font.Gotham
+		descLabel.TextSize = 9
+		descLabel.TextXAlignment = Enum.TextXAlignment.Left
+		descLabel.ZIndex = 3
+		descLabel.Parent = group
+
+		local toggleBox = Instance.new("Frame")
+		toggleBox.Size = UDim2.new(0, 32, 0, 18)
+		toggleBox.Position = UDim2.new(1, -38, 0, 7)
+		toggleBox.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+		toggleBox.BorderSizePixel = 0
+		toggleBox.ZIndex = 3
+		Instance.new("UICorner", toggleBox).CornerRadius = UDim.new(0, 9)
+		toggleBox.Parent = group
+
+		local indicator = Instance.new("Frame")
+		indicator.Size = UDim2.new(0, 12, 0, 12)
+		indicator.Position = UDim2.new(0, 3, 0, 3)
+		indicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		indicator.BorderSizePixel = 0
+		indicator.ZIndex = 4
+		Instance.new("UICorner", indicator).CornerRadius = UDim.new(0, 6)
+		indicator.Parent = toggleBox
+
+		local toggleButton = Instance.new("TextButton")
+		toggleButton.Size = UDim2.new(1, 0, 1, 0)
+		toggleButton.BackgroundTransparency = 1
+		toggleButton.Text = ""
+		toggleButton.ZIndex = 5
+		toggleButton.Parent = toggleBox
+
+		local enabled = false
+		local toggleCallback = nil
+
+		local function updateVisual()
+			toggleBox.BackgroundColor3 = enabled and Color3.fromRGB(50, 100, 220) or Color3.fromRGB(60, 60, 80)
+			indicator.Position = enabled and UDim2.new(1, -15, 0, 3) or UDim2.new(0, 3, 0, 3)
+		end
+		updateVisual()
+
+		toggleButton.MouseButton1Click:Connect(function()
+			enabled = not enabled
+			updateVisual()
+			if toggleCallback then toggleCallback(enabled) end
+		end)
+
+		return {
+			Group = group,
+			IsEnabled = function() return enabled end,
+			SetEnabled = function(val) enabled = val; updateVisual() end,
+			OnToggle = function(cb) toggleCallback = cb end
+		}
+	end
+
+	-- ================== ОСНОВНОЙ КАРКАС ==================
 	mainFrame = Instance.new("Frame")
 	mainFrame.Size = UDim2.new(0, 340, 0, 380)
 	mainFrame.Position = UDim2.new(0.5, -170, 0.5, -190)
@@ -693,6 +905,7 @@ function createMainMenu()
 	local soonTab = makeTab("soon", 26, 12)
 	local teleportTab = makeTab("Teleport", 52, 11)
 	local transportTab = makeTab("Transport", 78, 10)
+	local aimTab = makeTab("Aim", 104, 12)
 
 	local function makeContent()
 		local f = Instance.new("Frame")
@@ -710,6 +923,7 @@ function createMainMenu()
 	local soonTabContent = makeContent()
 	local teleportTabContent = makeContent()
 	local transportTabContent = makeContent()
+	local aimTabContent = makeContent()
 
 	local scrollingFrame = Instance.new("ScrollingFrame")
 	scrollingFrame.Size = UDim2.new(1, 0, 1, 0)
@@ -937,8 +1151,7 @@ function createMainMenu()
 	gpsIndicator.Size = UDim2.new(0, 12, 0, 12)
 	gpsIndicator.Position = UDim2.new(0, 3, 0, 3)
 	gpsIndicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-	gpsIndicator.BorderSizePixel = 0
-	gpsIndicator.ZIndex = 4
+	gpsIndicator.BorderSizePixel = 0	gpsIndicator.ZIndex = 4
 	Instance.new("UICorner", gpsIndicator).CornerRadius = UDim.new(0, 6)
 	gpsIndicator.Parent = gpsToggleBox
 
@@ -1009,7 +1222,6 @@ function createMainMenu()
 		if driving then exitCar() end
 	end)
 
-	-- Векторные иконки
 	local function drawCarIcon(parent, color)
 		local f = Instance.new("Frame")
 		f.Size = UDim2.new(1, -20, 0, 20)
@@ -1474,7 +1686,6 @@ function createMainMenu()
 	statusLabel.ZIndex = 3
 	statusLabel.Parent = transportScroll
 
-	-- ================== УПРАВЛЕНИЕ ТРАНСПОРТОМ ==================
 	local manageTitle = Instance.new("TextLabel")
 	manageTitle.Size = UDim2.new(1, -90, 0, 18)
 	manageTitle.Position = UDim2.new(0, 0, 0, 340)
@@ -1500,12 +1711,6 @@ function createMainMenu()
 	Instance.new("UICorner", deleteAllBtn).CornerRadius = UDim.new(0, 6)
 	deleteAllBtn.Parent = transportScroll
 
-	local deleteAllStroke = Instance.new("UIStroke")
-	deleteAllStroke.Color = Color3.fromRGB(255, 100, 100)
-	deleteAllStroke.Thickness = 1
-	deleteAllStroke.Transparency = 0.5
-	deleteAllStroke.Parent = deleteAllBtn
-
 	local vehicleListFrame = Instance.new("ScrollingFrame")
 	vehicleListFrame.Size = UDim2.new(1, 0, 0, 120)
 	vehicleListFrame.Position = UDim2.new(0, 0, 0, 364)
@@ -1517,12 +1722,6 @@ function createMainMenu()
 	vehicleListFrame.ZIndex = 3
 	Instance.new("UICorner", vehicleListFrame).CornerRadius = UDim.new(0, 8)
 	vehicleListFrame.Parent = transportScroll
-
-	local vehicleListStroke = Instance.new("UIStroke")
-	vehicleListStroke.Color = Color3.fromRGB(40, 60, 110)
-	vehicleListStroke.Thickness = 1
-	vehicleListStroke.Transparency = 0.5
-	vehicleListStroke.Parent = vehicleListFrame
 
 	local vehicleLayout = Instance.new("UIListLayout")
 	vehicleLayout.Padding = UDim.new(0, 4)
@@ -1591,12 +1790,6 @@ function createMainMenu()
 			Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
 			row.Parent = vehicleListFrame
 
-			local rowStroke = Instance.new("UIStroke")
-			rowStroke.Color = Color3.fromRGB(45, 65, 115)
-			rowStroke.Thickness = 1
-			rowStroke.Transparency = 0.5
-			rowStroke.Parent = row
-
 			local numLabel = Instance.new("TextLabel")
 			numLabel.Size = UDim2.new(0, 26, 0, 26)
 			numLabel.Position = UDim2.new(0, 4, 0, 3)
@@ -1636,17 +1829,6 @@ function createMainMenu()
 			Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 5)
 			delBtn.Parent = row
 
-			delBtn.MouseEnter:Connect(function()
-				TweenService:Create(delBtn, TweenInfo.new(0.15), {
-					BackgroundColor3 = Color3.fromRGB(210, 65, 75),
-				}):Play()
-			end)
-			delBtn.MouseLeave:Connect(function()
-				TweenService:Create(delBtn, TweenInfo.new(0.15), {
-					BackgroundColor3 = Color3.fromRGB(170, 45, 55),
-				}):Play()
-			end)
-
 			delBtn.MouseButton1Click:Connect(function()
 				deleteVehicle(i)
 			end)
@@ -1654,17 +1836,6 @@ function createMainMenu()
 
 		vehicleListFrame.CanvasSize = UDim2.new(0, 0, 0, #spawnedVehicles * 36 + 8)
 	end
-
-	deleteAllBtn.MouseEnter:Connect(function()
-		TweenService:Create(deleteAllBtn, TweenInfo.new(0.15), {
-			BackgroundColor3 = Color3.fromRGB(210, 60, 60),
-		}):Play()
-	end)
-	deleteAllBtn.MouseLeave:Connect(function()
-		TweenService:Create(deleteAllBtn, TweenInfo.new(0.15), {
-			BackgroundColor3 = Color3.fromRGB(180, 45, 45),
-		}):Play()
-	end)
 
 	deleteAllBtn.MouseButton1Click:Connect(function()
 		deleteAllVehicles()
@@ -1714,10 +1885,257 @@ function createMainMenu()
 		end
 	end)
 
+	-- ================== AIM TAB ==================
+	local aimSettings = {
+		enabled = false,
+		showFov = true,
+		fov = 120,
+		wallCheck = true,
+		smoothness = 1,
+		targetPart = "Head",
+		teamCheck = true,
+	}
+	local aimConnection = nil
+
+	local fovCircle = Instance.new("Frame")
+	fovCircle.Name = "FovCircle"
+	fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+	fovCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+	fovCircle.BackgroundTransparency = 1
+	fovCircle.BorderSizePixel = 0
+	fovCircle.Visible = false
+	fovCircle.ZIndex = 5
+	fovCircle.Parent = screenGui
+
+	local fovCircleStroke = Instance.new("UIStroke")
+	fovCircleStroke.Color = Color3.fromRGB(50, 100, 220)
+	fovCircleStroke.Thickness = 2
+	fovCircleStroke.Transparency = 0.3
+	fovCircleStroke.Parent = fovCircle
+
+	Instance.new("UICorner", fovCircle).CornerRadius = UDim.new(1, 0)
+
+	local function updateFovVisual()
+		local size = aimSettings.fov * 2
+		fovCircle.Size = UDim2.new(0, size, 0, size)
+		fovCircle.Visible = aimSettings.enabled and aimSettings.showFov
+	end
+
+	local aimTitle = Instance.new("TextLabel")
+	aimTitle.Size = UDim2.new(1, 0, 0, 18)
+	aimTitle.BackgroundTransparency = 1
+	aimTitle.Text = "Aim Assist"
+	aimTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+	aimTitle.Font = Enum.Font.GothamBold
+	aimTitle.TextSize = 14
+	aimTitle.TextXAlignment = Enum.TextXAlignment.Left
+	aimTitle.ZIndex = 3
+	aimTitle.Parent = aimTabContent
+
+	local aimToggle = createToggle("Aim Assist", "Автоматическое наведение", 24, aimTabContent)
+
+	local function isVisible(targetPart)
+		local char = player.Character
+		if not char then return false end
+		local myRoot = char:FindFirstChild("HumanoidRootPart")
+		if not myRoot then return false end
+
+		local rayParams = RaycastParams.new()
+		rayParams.FilterType = Enum.RaycastFilterType.Exclude
+		rayParams.FilterDescendantsInstances = {char, Camera}
+
+		local origin = Camera.CFrame.Position
+		local direction = (targetPart.Position - origin)
+		local result = Workspace:Raycast(origin, direction, rayParams)
+
+		if not result then return true end
+
+		local hit = result.Instance
+		if hit == targetPart or hit:IsDescendantOf(targetPart.Parent) then
+			return true
+		end
+		return false
+	end
+
+	local function getTarget()
+		local char = player.Character
+		if not char then return nil end
+		local myRoot = char:FindFirstChild("HumanoidRootPart")
+		local myHum = char:FindFirstChildOfClass("Humanoid")
+		if not myRoot or not myHum then return nil end
+
+		local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+		local bestTarget = nil
+		local bestDist = aimSettings.fov
+
+		for _, p in ipairs(Players:GetPlayers()) do
+			if p == player then continue end
+
+			local pChar = p.Character
+			if not pChar then continue end
+			local pHum = pChar:FindFirstChildOfClass("Humanoid")
+			if not pHum or pHum.Health <= 0 then continue end
+
+			if aimSettings.teamCheck and p.Team and player.Team and p.Team == player.Team then
+				continue
+			end
+
+			local part = pChar:FindFirstChild(aimSettings.targetPart)
+			if not part then continue end
+
+			if aimSettings.wallCheck and not isVisible(part) then
+				continue
+			end
+
+			local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
+			if not onScreen or screenPos.Z <= 0 then continue end
+
+			local dist = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+			if dist < bestDist then
+				bestDist = dist
+				bestTarget = part
+			end
+		end
+
+		return bestTarget
+	end
+
+	local function aimAt(targetPart)
+		if not targetPart or not targetPart.Parent then return end
+		local targetPos = targetPart.Position
+		local currentCF = Camera.CFrame
+		local desiredCF = CFrame.lookAt(currentCF.Position, targetPos)
+		if aimSettings.smoothness <= 1 then
+			Camera.CFrame = desiredCF
+		else
+			local alpha = 1 / aimSettings.smoothness
+			Camera.CFrame = currentCF:Lerp(desiredCF, math.clamp(alpha, 0, 1))
+		end
+	end
+
+	local function startAim()
+		if aimConnection then return end
+		aimConnection = RunService.RenderStepped:Connect(function()
+			if not aimSettings.enabled then return end
+			local target = getTarget()
+			if target then
+				aimAt(target)
+				fovCircleStroke.Color = Color3.fromRGB(255, 80, 80)
+			else
+				fovCircleStroke.Color = Color3.fromRGB(50, 100, 220)
+			end
+		end)
+	end
+
+	local function stopAim()
+		if aimConnection then
+			aimConnection:Disconnect()
+			aimConnection = nil
+		end
+	end
+
+	aimToggle.OnToggle(function(on)
+		aimSettings.enabled = on
+		updateFovVisual()
+		if on then
+			startAim()
+		else
+			stopAim()
+		end
+	end)
+
+	local aimFovToggle = createToggle("Show FOV", "Показывать круг радиуса", 92, aimTabContent)
+	aimFovToggle.OnToggle(function(on)
+		aimSettings.showFov = on
+		updateFovVisual()
+	end)
+	aimFovToggle.SetEnabled(true)
+
+	local aimWallToggle = createToggle("Wall Check", "Не наводиться на игроков за стенами", 126, aimTabContent)
+	aimWallToggle.OnToggle(function(on)
+		aimSettings.wallCheck = on
+	end)
+	aimWallToggle.SetEnabled(true)
+
+	local aimTeamToggle = createToggle("Team Check", "Не наводиться на союзников", 160, aimTabContent)
+	aimTeamToggle.OnToggle(function(on)
+		aimSettings.teamCheck = on
+	end)
+	aimTeamToggle.SetEnabled(true)
+
+	local aimFovSlider = createSlider("FOV Radius", "Радиус круга (30-500)", 30, 500, 120, 194, aimTabContent)
+	aimFovSlider.OnDrag(function(val)
+		aimSettings.fov = val
+		updateFovVisual()
+	end)
+
+	local aimSmoothSlider = createSlider("Smoothness", "1 — мгновенно, 10 — плавно", 1, 10, 1, 234, aimTabContent)
+	aimSmoothSlider.OnDrag(function(val)
+		aimSettings.smoothness = val
+	end)
+
+	local aimPartLabel = Instance.new("TextLabel")
+	aimPartLabel.Size = UDim2.new(1, 0, 0, 14)
+	aimPartLabel.Position = UDim2.new(0, 0, 0, 274)
+	aimPartLabel.BackgroundTransparency = 1
+	aimPartLabel.Text = "Target Part"
+	aimPartLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	aimPartLabel.Font = Enum.Font.GothamSemibold
+	aimPartLabel.TextSize = 12
+	aimPartLabel.TextXAlignment = Enum.TextXAlignment.Left
+	aimPartLabel.ZIndex = 3
+	aimPartLabel.Parent = aimTabContent
+
+	local partButtonsFrame = Instance.new("Frame")
+	partButtonsFrame.Size = UDim2.new(1, 0, 0, 26)
+	partButtonsFrame.Position = UDim2.new(0, 0, 0, 290)
+	partButtonsFrame.BackgroundTransparency = 1
+	partButtonsFrame.ZIndex = 3
+	partButtonsFrame.Parent = aimTabContent
+
+	local partOptions = {"Head", "UpperTorso", "HumanoidRootPart"}
+	local partButtons = {}
+
+	local function updatePartButtons()
+		for _, data in ipairs(partButtons) do
+			if data.name == aimSettings.targetPart then
+				data.btn.BackgroundColor3 = Color3.fromRGB(50, 100, 220)
+			else
+				data.btn.BackgroundColor3 = Color3.fromRGB(40, 50, 80)
+			end
+		end
+	end
+
+	for i, partName in ipairs(partOptions) do
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(0, 78, 0, 22)
+		btn.Position = UDim2.new(0, (i - 1) * 82, 0, 0)
+		btn.BackgroundColor3 = Color3.fromRGB(40, 50, 80)
+		btn.BorderSizePixel = 0
+		btn.Text = partName == "HumanoidRootPart" and "Root" or partName
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+		btn.Font = Enum.Font.GothamSemibold
+		btn.TextSize = 9
+		btn.AutoButtonColor = false
+		btn.ZIndex = 4
+		Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
+		btn.Parent = partButtonsFrame
+
+		btn.MouseButton1Click:Connect(function()
+			aimSettings.targetPart = partName
+			updatePartButtons()
+		end)
+
+		table.insert(partButtons, {btn = btn, name = partName})
+	end
+
+	updatePartButtons()
+	updateFovVisual()
+
 	-- ПЕРЕКЛЮЧЕНИЕ ВКЛАДОК
 	local currentTab = "Main"
-	local tabColors = { Main = mainTab, soon = soonTab, Teleport = teleportTab, Transport = transportTab }
-	local tabContents = { Main = mainTabContent, soon = soonTabContent, Teleport = teleportTabContent, Transport = transportTabContent }
+	local tabColors = { Main = mainTab, soon = soonTab, Teleport = teleportTab, Transport = transportTab, Aim = aimTab }
+	local tabContents = { Main = mainTabContent, soon = soonTabContent, Teleport = teleportTabContent, Transport = transportTabContent, Aim = aimTabContent }
 
 	local function showTab(tabName)
 		currentTab = tabName
@@ -1731,6 +2149,7 @@ function createMainMenu()
 	soonTab.MouseButton1Click:Connect(function() showTab("soon") end)
 	teleportTab.MouseButton1Click:Connect(function() showTab("Teleport") end)
 	transportTab.MouseButton1Click:Connect(function() showTab("Transport") end)
+	aimTab.MouseButton1Click:Connect(function() showTab("Aim") end)
 
 	-- СОСТОЯНИЕ
 	local currentSpeed = 16
@@ -1741,211 +2160,6 @@ function createMainMenu()
 	local btnForward, btnBackward, btnUp, btnDown
 	local forwardPressed, backwardPressed, upPressed, downPressed = false, false, false, false
 	local noclipEnabled = false
-
-	-- ФАБРИКИ
-	local function createSlider(name, desc, minVal, maxVal, defaultVal, positionY, parent)
-		local group = Instance.new("Frame")
-		group.Size = UDim2.new(1, 0, 0, 40)
-		group.Position = UDim2.new(0, 0, 0, positionY)
-		group.BackgroundTransparency = 1
-		group.ZIndex = 3
-		group.Parent = parent
-
-		local nameLabel = Instance.new("TextLabel")
-		nameLabel.Size = UDim2.new(1, 0, 0, 14)
-		nameLabel.BackgroundTransparency = 1
-		nameLabel.Text = name
-		nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-		nameLabel.Font = Enum.Font.GothamSemibold
-		nameLabel.TextSize = 12
-		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-		nameLabel.ZIndex = 3
-		nameLabel.Parent = group
-
-		local descLabel = Instance.new("TextLabel")
-		descLabel.Size = UDim2.new(1, 0, 0, 11)
-		descLabel.Position = UDim2.new(0, 0, 0, 14)
-		descLabel.BackgroundTransparency = 1
-		descLabel.Text = desc
-		descLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-		descLabel.Font = Enum.Font.Gotham
-		descLabel.TextSize = 9
-		descLabel.TextXAlignment = Enum.TextXAlignment.Left
-		descLabel.ZIndex = 3
-		descLabel.Parent = group
-
-		local track = Instance.new("Frame")
-		track.Size = UDim2.new(1, -44, 0, 6)
-		track.Position = UDim2.new(0, 0, 0, 28)
-		track.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
-		track.BorderSizePixel = 0
-		track.ZIndex = 3
-		Instance.new("UICorner", track).CornerRadius = UDim.new(0, 3)
-		track.Parent = group
-
-		local fill = Instance.new("Frame")
-		fill.Size = UDim2.new(0, 0, 1, 0)
-		fill.BackgroundColor3 = Color3.fromRGB(50, 100, 220)
-		fill.BorderSizePixel = 0
-		fill.ZIndex = 4
-		Instance.new("UICorner", fill).CornerRadius = UDim.new(0, 3)
-		fill.Parent = track
-
-		local thumb = Instance.new("Frame")
-		thumb.Size = UDim2.new(0, 12, 0, 12)
-		thumb.AnchorPoint = Vector2.new(0.5, 0.5)
-		thumb.Position = UDim2.new(0, 0, 0.5, 0)
-		thumb.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		thumb.BorderSizePixel = 0
-		thumb.ZIndex = 5
-		Instance.new("UICorner", thumb).CornerRadius = UDim.new(0, 6)
-		thumb.Parent = track
-
-		local sliderButton = Instance.new("TextButton")
-		sliderButton.Size = UDim2.new(1, 0, 1, 0)
-		sliderButton.BackgroundTransparency = 1
-		sliderButton.Text = ""
-		sliderButton.ZIndex = 6
-		sliderButton.Parent = track
-
-		local valueLabel = Instance.new("TextLabel")
-		valueLabel.Size = UDim2.new(0, 38, 0, 14)
-		valueLabel.Position = UDim2.new(1, -38, 0, 28)
-		valueLabel.BackgroundTransparency = 1
-		valueLabel.Text = tostring(defaultVal)
-		valueLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-		valueLabel.Font = Enum.Font.GothamBold
-		valueLabel.TextSize = 11
-		valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-		valueLabel.ZIndex = 3
-		valueLabel.Parent = group
-
-		local currentValue = defaultVal
-		local dragCallback = nil
-		local sliderDragging = false
-
-		local function updateVisual()
-			local fraction = (currentValue - minVal) / (maxVal - minVal)
-			fill.Size = UDim2.new(fraction, 0, 1, 0)
-			thumb.Position = UDim2.new(fraction, 0, 0.5, 0)
-			valueLabel.Text = tostring(currentValue)
-		end
-		updateVisual()
-
-		local function computeValue(inputX)
-			local trackWidth = track.AbsoluteSize.X
-			if trackWidth <= 0 then return end
-			local relX = inputX - track.AbsolutePosition.X
-			local fraction = math.clamp(relX / trackWidth, 0, 1)
-			currentValue = math.clamp(math.floor(minVal + fraction * (maxVal - minVal) + 0.5), minVal, maxVal)
-			updateVisual()
-			if dragCallback then dragCallback(currentValue) end
-		end
-
-		sliderButton.InputBegan:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-				sliderDragging = true
-				computeValue(input.Position.X)
-			end
-		end)
-
-		UserInputService.InputChanged:Connect(function(input)
-			if sliderDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-				computeValue(input.Position.X)
-			end
-		end)
-
-		UserInputService.InputEnded:Connect(function(input)
-			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-				sliderDragging = false
-			end
-		end)
-
-		return {
-			GetValue = function() return currentValue end,
-			SetValue = function(val) currentValue = val; updateVisual() end,
-			OnDrag = function(cb) dragCallback = cb end
-		}
-	end
-
-	local function createToggle(name, desc, positionY, parent)
-		local group = Instance.new("Frame")
-		group.Size = UDim2.new(1, 0, 0, 34)
-		group.Position = UDim2.new(0, 0, 0, positionY)
-		group.BackgroundTransparency = 1
-		group.ZIndex = 3
-		group.Parent = parent
-
-		local nameLabel = Instance.new("TextLabel")
-		nameLabel.Size = UDim2.new(1, -46, 0, 14)
-		nameLabel.BackgroundTransparency = 1
-		nameLabel.Text = name
-		nameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-		nameLabel.Font = Enum.Font.GothamSemibold
-		nameLabel.TextSize = 12
-		nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-		nameLabel.ZIndex = 3
-		nameLabel.Parent = group
-
-		local descLabel = Instance.new("TextLabel")
-		descLabel.Size = UDim2.new(1, -46, 0, 11)
-		descLabel.Position = UDim2.new(0, 0, 0, 14)
-		descLabel.BackgroundTransparency = 1
-		descLabel.Text = desc
-		descLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-		descLabel.Font = Enum.Font.Gotham
-		descLabel.TextSize = 9
-		descLabel.TextXAlignment = Enum.TextXAlignment.Left
-		descLabel.ZIndex = 3
-		descLabel.Parent = group
-
-		local toggleBox = Instance.new("Frame")
-		toggleBox.Size = UDim2.new(0, 32, 0, 18)
-		toggleBox.Position = UDim2.new(1, -38, 0, 7)
-		toggleBox.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-		toggleBox.BorderSizePixel = 0
-		toggleBox.ZIndex = 3
-		Instance.new("UICorner", toggleBox).CornerRadius = UDim.new(0, 9)
-		toggleBox.Parent = group
-
-		local indicator = Instance.new("Frame")
-		indicator.Size = UDim2.new(0, 12, 0, 12)
-		indicator.Position = UDim2.new(0, 3, 0, 3)
-		indicator.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		indicator.BorderSizePixel = 0
-		indicator.ZIndex = 4
-		Instance.new("UICorner", indicator).CornerRadius = UDim.new(0, 6)
-		indicator.Parent = toggleBox
-
-		local toggleButton = Instance.new("TextButton")
-		toggleButton.Size = UDim2.new(1, 0, 1, 0)
-		toggleButton.BackgroundTransparency = 1
-		toggleButton.Text = ""
-		toggleButton.ZIndex = 5
-		toggleButton.Parent = toggleBox
-
-		local enabled = false
-		local toggleCallback = nil
-
-		local function updateVisual()
-			toggleBox.BackgroundColor3 = enabled and Color3.fromRGB(50, 100, 220) or Color3.fromRGB(60, 60, 80)
-			indicator.Position = enabled and UDim2.new(1, -15, 0, 3) or UDim2.new(0, 3, 0, 3)
-		end
-		updateVisual()
-
-		toggleButton.MouseButton1Click:Connect(function()
-			enabled = not enabled
-			updateVisual()
-			if toggleCallback then toggleCallback(enabled) end
-		end)
-
-		return {
-			Group = group,
-			IsEnabled = function() return enabled end,
-			SetEnabled = function(val) enabled = val; updateVisual() end,
-			OnToggle = function(cb) toggleCallback = cb end
-		}
-	end
 
 	-- MAIN TAB
 	local speedSlider = createSlider("Speed Changer", "Скорость бега (16-300)", 16, 300, 16, 0, scrollingFrame)
@@ -1997,46 +2211,17 @@ function createMainMenu()
 		end
 	end)
 
-	-- ESP
+	-- ESP (упрощённый)
 	local espSettings = {
 		color = Color3.fromRGB(50, 100, 220),
 		showTracer = false,
-		showSkeleton = false,
 		showHealth = true,
 	}
-
 	local espFrames = {}
 	local espConnection
-	local espPlayerAddedConn
-	local espPlayerRemovingConn
-
-	local R15_BONES = {
-		{"Head", "UpperTorso"}, {"UpperTorso", "LowerTorso"},
-		{"UpperTorso", "LeftUpperArm"}, {"LeftUpperArm", "LeftLowerArm"}, {"LeftLowerArm", "LeftHand"},
-		{"UpperTorso", "RightUpperArm"}, {"RightUpperArm", "RightLowerArm"}, {"RightLowerArm", "RightHand"},
-		{"LowerTorso", "LeftUpperLeg"}, {"LeftUpperLeg", "LeftLowerLeg"}, {"LeftLowerLeg", "LeftFoot"},
-		{"LowerTorso", "RightUpperLeg"}, {"RightUpperLeg", "RightLowerLeg"}, {"RightLowerLeg", "RightFoot"},
-	}
-	local R6_BONES = {
-		{"Head", "Torso"}, {"Torso", "Left Arm"}, {"Torso", "Right Arm"},
-		{"Torso", "Left Leg"}, {"Torso", "Right Leg"},
-	}
-	local MAX_SKELETON_LINES = #R15_BONES
-
-	local function setLine(line, p1, p2, color)
-		local delta = p2 - p1
-		local len = delta.Magnitude
-		if len < 2 then line.Visible = false; return end
-		line.Size = UDim2.new(0, len, 0, 1)
-		line.Position = UDim2.new(0, p1.X, 0, p1.Y)
-		line.BackgroundColor3 = color
-		line.Rotation = math.deg(math.atan2(delta.Y, delta.X))
-		line.Visible = true
-	end
 
 	local function createESPFrame(targetPlayer)
 		if espFrames[targetPlayer] then return end
-
 		local frame = Instance.new("Frame")
 		frame.BackgroundTransparency = 1
 		frame.BorderSizePixel = 0
@@ -2058,7 +2243,6 @@ function createMainMenu()
 		nameLabel.Font = Enum.Font.GothamBold
 		nameLabel.TextSize = 12
 		nameLabel.TextStrokeTransparency = 0
-		nameLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
 		nameLabel.ZIndex = 16
 		nameLabel.Parent = frame
 
@@ -2082,46 +2266,9 @@ function createMainMenu()
 		Instance.new("UICorner", healthBarFill).CornerRadius = UDim.new(0, 2)
 		healthBarFill.Parent = healthBarBg
 
-		local healthText = Instance.new("TextLabel")
-		healthText.Size = UDim2.new(0, 30, 0, 12)
-		healthText.Position = UDim2.new(0, -34, 1, 0)
-		healthText.AnchorPoint = Vector2.new(0, 1)
-		healthText.BackgroundTransparency = 1
-		healthText.Text = "100"
-		healthText.TextColor3 = Color3.fromRGB(255, 255, 255)
-		healthText.Font = Enum.Font.GothamBold
-		healthText.TextSize = 10
-		healthText.TextStrokeTransparency = 0
-		healthText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-		healthText.TextXAlignment = Enum.TextXAlignment.Right
-		healthText.Visible = false
-		healthText.ZIndex = 16
-		healthText.Parent = frame
-
-		local tracer = Instance.new("Frame")
-		tracer.BackgroundColor3 = espSettings.color
-		tracer.BorderSizePixel = 0
-		tracer.Visible = false
-		tracer.AnchorPoint = Vector2.new(0, 0.5)
-		tracer.ZIndex = 14
-		tracer.Parent = screenGui
-
-		local skeletonLines = {}
-		for i = 1, MAX_SKELETON_LINES do
-			local line = Instance.new("Frame")
-			line.BackgroundColor3 = espSettings.color
-			line.BorderSizePixel = 0
-			line.Visible = false
-			line.AnchorPoint = Vector2.new(0, 0.5)
-			line.ZIndex = 14
-			line.Parent = screenGui
-			skeletonLines[i] = line
-		end
-
 		espFrames[targetPlayer] = {
 			frame = frame, stroke = stroke, nameLabel = nameLabel,
-			healthBarBg = healthBarBg, healthBarFill = healthBarFill, healthText = healthText,
-			tracer = tracer, skeletonLines = skeletonLines,
+			healthBarBg = healthBarBg, healthBarFill = healthBarFill,
 		}
 	end
 
@@ -2129,8 +2276,6 @@ function createMainMenu()
 		local data = espFrames[targetPlayer]
 		if data then
 			data.frame:Destroy()
-			data.tracer:Destroy()
-			for _, l in ipairs(data.skeletonLines) do l:Destroy() end
 			espFrames[targetPlayer] = nil
 		end
 	end
@@ -2140,27 +2285,19 @@ function createMainMenu()
 		if not data then return end
 
 		local character = targetPlayer.Character
-		if not character then
-			data.frame.Visible = false; data.tracer.Visible = false
-			for _, l in ipairs(data.skeletonLines) do l.Visible = false end
-			return
-		end
+		if not character then data.frame.Visible = false; return end
 
 		local rootPart = character:FindFirstChild("HumanoidRootPart")
 		local head = character:FindFirstChild("Head")
 		local humanoid = character:FindFirstChild("Humanoid")
 		if not (rootPart and head and humanoid and humanoid.Health > 0) then
-			data.frame.Visible = false; data.tracer.Visible = false
-			for _, l in ipairs(data.skeletonLines) do l.Visible = false end
-			return
+			data.frame.Visible = false; return
 		end
 
 		local screenPosRoot, onScreenRoot = Camera:WorldToViewportPoint(rootPart.Position)
 		local screenPosHead, onScreenHead = Camera:WorldToViewportPoint(head.Position)
 		if not (onScreenRoot and onScreenHead and screenPosRoot.Z > 0 and screenPosHead.Z > 0) then
-			data.frame.Visible = false; data.tracer.Visible = false
-			for _, l in ipairs(data.skeletonLines) do l.Visible = false end
-			return
+			data.frame.Visible = false; return
 		end
 
 		local distance = (Camera.CFrame.Position - rootPart.Position).Magnitude
@@ -2182,7 +2319,6 @@ function createMainMenu()
 
 		if espSettings.showHealth then
 			data.healthBarBg.Visible = true
-			data.healthText.Visible = true
 			local ratio = math.clamp(humanoid.Health / math.max(humanoid.MaxHealth, 1), 0, 1)
 			data.healthBarFill.Size = UDim2.new(1, 0, ratio, 0)
 			if ratio > 0.66 then
@@ -2192,284 +2328,26 @@ function createMainMenu()
 			else
 				data.healthBarFill.BackgroundColor3 = Color3.fromRGB(230, 60, 60)
 			end
-			data.healthText.Text = tostring(math.floor(humanoid.Health))
 		else
 			data.healthBarBg.Visible = false
-			data.healthText.Visible = false
-		end
-
-		if espSettings.showTracer then
-			local origin = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y - 2)
-			local targetPt = Vector2.new(screenPosHead.X, screenPosHead.Y + 8)
-			setLine(data.tracer, origin, targetPt, espSettings.color)
-		else
-			data.tracer.Visible = false
-		end
-
-		if espSettings.showSkeleton then
-			local bones = character:FindFirstChild("UpperTorso") and R15_BONES or R6_BONES
-			for i = 1, #data.skeletonLines do
-				local line = data.skeletonLines[i]
-				local bone = bones[i]
-				if bone then
-					local p1Part = character:FindFirstChild(bone[1])
-					local p2Part = character:FindFirstChild(bone[2])
-					if p1Part and p2Part then
-						local sp1, on1 = Camera:WorldToViewportPoint(p1Part.Position)
-						local sp2, on2 = Camera:WorldToViewportPoint(p2Part.Position)
-						if on1 and on2 and sp1.Z > 0 and sp2.Z > 0 then
-							setLine(line, Vector2.new(sp1.X, sp1.Y), Vector2.new(sp2.X, sp2.Y), espSettings.color)
-						else
-							line.Visible = false
-						end
-					else
-						line.Visible = false
-					end
-				else
-					line.Visible = false
-				end
-			end
-		else
-			for _, l in ipairs(data.skeletonLines) do l.Visible = false end
 		end
 	end
 
 	local espToggle = createToggle("ESP", "Отображение игроков через стены", 188, scrollingFrame)
-
-	for _, child in ipairs(espToggle.Group:GetChildren()) do
-		if child:IsA("TextLabel") then
-			child.Size = UDim2.new(1, -76, 0, child.Size.Y.Offset)
-		end
-	end
-
-	local espSettingsBtn = Instance.new("TextButton")
-	espSettingsBtn.Size = UDim2.new(0, 20, 0, 20)
-	espSettingsBtn.Position = UDim2.new(1, -64, 0, 7)
-	espSettingsBtn.BackgroundColor3 = Color3.fromRGB(80, 110, 180)
-	espSettingsBtn.BorderSizePixel = 0
-	espSettingsBtn.Text = "*"
-	espSettingsBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-	espSettingsBtn.Font = Enum.Font.GothamBold
-	espSettingsBtn.TextSize = 14
-	espSettingsBtn.ZIndex = 6
-	Instance.new("UICorner", espSettingsBtn).CornerRadius = UDim.new(0, 4)
-	espSettingsBtn.Parent = espToggle.Group
-
-	local settingsPanel = Instance.new("Frame")
-	settingsPanel.Size = UDim2.new(0, 210, 0, 208)
-	settingsPanel.Position = UDim2.new(0, 85, 0, 155)
-	settingsPanel.BackgroundColor3 = Color3.fromRGB(18, 26, 55)
-	settingsPanel.BorderSizePixel = 0
-	settingsPanel.Visible = false
-	settingsPanel.ZIndex = 30
-	Instance.new("UICorner", settingsPanel).CornerRadius = UDim.new(0, 8)
-	settingsPanel.Parent = mainFrame
-
-	local settingsStroke = Instance.new("UIStroke")
-	settingsStroke.Color = Color3.fromRGB(50, 100, 220)
-	settingsStroke.Thickness = 1
-	settingsStroke.Parent = settingsPanel
-
-	local settingsTitle = Instance.new("TextLabel")
-	settingsTitle.Size = UDim2.new(1, -20, 0, 22)
-	settingsTitle.Position = UDim2.new(0, 10, 0, 6)
-	settingsTitle.BackgroundTransparency = 1
-	settingsTitle.Text = "ESP Settings"
-	settingsTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-	settingsTitle.Font = Enum.Font.GothamBold
-	settingsTitle.TextSize = 13
-	settingsTitle.TextXAlignment = Enum.TextXAlignment.Left
-	settingsTitle.ZIndex = 31
-	settingsTitle.Parent = settingsPanel
-
-	local settingsClose = Instance.new("TextButton")
-	settingsClose.Size = UDim2.new(0, 18, 0, 18)
-	settingsClose.Position = UDim2.new(1, -24, 0, 8)
-	settingsClose.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-	settingsClose.BorderSizePixel = 0
-	settingsClose.Text = "X"
-	settingsClose.TextColor3 = Color3.fromRGB(255, 255, 255)
-	settingsClose.Font = Enum.Font.GothamBold
-	settingsClose.TextSize = 10
-	settingsClose.ZIndex = 32
-	Instance.new("UICorner", settingsClose).CornerRadius = UDim.new(0, 4)
-	settingsClose.Parent = settingsPanel
-	settingsClose.MouseButton1Click:Connect(function() settingsPanel.Visible = false end)
-
-	local function makeMiniToggle(label, y)
-		local row = Instance.new("Frame")
-		row.Size = UDim2.new(1, -20, 0, 22)
-		row.Position = UDim2.new(0, 10, 0, y)
-		row.BackgroundTransparency = 1
-		row.ZIndex = 31
-		row.Parent = settingsPanel
-
-		local lbl = Instance.new("TextLabel")
-		lbl.Size = UDim2.new(1, -46, 1, 0)
-		lbl.BackgroundTransparency = 1
-		lbl.Text = label
-		lbl.TextColor3 = Color3.fromRGB(230, 230, 240)
-		lbl.Font = Enum.Font.Gotham
-		lbl.TextSize = 12
-		lbl.TextXAlignment = Enum.TextXAlignment.Left
-		lbl.ZIndex = 32
-		lbl.Parent = row
-
-		local box = Instance.new("Frame")
-		box.Size = UDim2.new(0, 28, 0, 16)
-		box.Position = UDim2.new(1, -32, 0.5, -8)
-		box.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-		box.BorderSizePixel = 0
-		box.ZIndex = 32
-		Instance.new("UICorner", box).CornerRadius = UDim.new(0, 8)
-		box.Parent = row
-
-		local ind = Instance.new("Frame")
-		ind.Size = UDim2.new(0, 10, 0, 10)
-		ind.Position = UDim2.new(0, 3, 0, 3)
-		ind.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		ind.BorderSizePixel = 0
-		ind.ZIndex = 33
-		Instance.new("UICorner", ind).CornerRadius = UDim.new(0, 5)
-		ind.Parent = box
-
-		local btn = Instance.new("TextButton")
-		btn.Size = UDim2.new(1, 0, 1, 0)
-		btn.BackgroundTransparency = 1
-		btn.Text = ""
-		btn.ZIndex = 34
-		btn.Parent = box
-
-		return {
-			Button = btn,
-			SetState = function(state)
-				if state then
-					box.BackgroundColor3 = Color3.fromRGB(50, 100, 220)
-					ind.Position = UDim2.new(1, -13, 0, 3)
-				else
-					box.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
-					ind.Position = UDim2.new(0, 3, 0, 3)
-				end
-			end
-		}
-	end
-
-	local tracerToggle = makeMiniToggle("Tracer line", 32)
-	local skeletonToggle = makeMiniToggle("Skeleton", 58)
-	local healthToggle = makeMiniToggle("Health bar", 84)
-
-	local colorTitle = Instance.new("TextLabel")
-	colorTitle.Size = UDim2.new(1, -20, 0, 14)
-	colorTitle.Position = UDim2.new(0, 10, 0, 110)
-	colorTitle.BackgroundTransparency = 1
-	colorTitle.Text = "Box Color"
-	colorTitle.TextColor3 = Color3.fromRGB(230, 230, 240)
-	colorTitle.Font = Enum.Font.Gotham
-	colorTitle.TextSize = 11
-	colorTitle.TextXAlignment = Enum.TextXAlignment.Left
-	colorTitle.ZIndex = 31
-	colorTitle.Parent = settingsPanel
-
-	local colorRow = Instance.new("Frame")
-	colorRow.Size = UDim2.new(1, -20, 0, 28)
-	colorRow.Position = UDim2.new(0, 10, 0, 128)
-	colorRow.BackgroundTransparency = 1
-	colorRow.ZIndex = 31
-	colorRow.Parent = settingsPanel
-
-	local colorOptions = {
-		Color3.fromRGB(50, 100, 220), Color3.fromRGB(220, 50, 50), Color3.fromRGB(50, 220, 80),
-		Color3.fromRGB(230, 200, 60), Color3.fromRGB(180, 50, 220), Color3.fromRGB(255, 255, 255),
-	}
-
-	local function applyColorToAll(col)
-		espSettings.color = col
-		for _, data in pairs(espFrames) do
-			data.stroke.Color = col
-			data.tracer.BackgroundColor3 = col
-			for _, l in ipairs(data.skeletonLines) do l.BackgroundColor3 = col end
-		end
-	end
-
-	for i, col in ipairs(colorOptions) do
-		local swatch = Instance.new("TextButton")
-		swatch.Size = UDim2.new(0, 24, 0, 24)
-		swatch.Position = UDim2.new(0, (i - 1) * 27, 0, 2)
-		swatch.BackgroundColor3 = col
-		swatch.BorderSizePixel = 0
-		swatch.Text = ""
-		swatch.ZIndex = 32
-		Instance.new("UICorner", swatch).CornerRadius = UDim.new(0, 4)
-		swatch.Parent = colorRow
-		swatch.MouseButton1Click:Connect(function() applyColorToAll(col) end)
-	end
-
-	local settingsHint = Instance.new("TextLabel")
-	settingsHint.Size = UDim2.new(1, -20, 0, 24)
-	settingsHint.Position = UDim2.new(0, 10, 1, -28)
-	settingsHint.BackgroundTransparency = 1
-	settingsHint.Text = "Изменения применяются сразу"
-	settingsHint.TextColor3 = Color3.fromRGB(150, 170, 210)
-	settingsHint.Font = Enum.Font.Gotham
-	settingsHint.TextSize = 10
-	settingsHint.TextXAlignment = Enum.TextXAlignment.Left
-	settingsHint.TextYAlignment = Enum.TextYAlignment.Center
-	settingsHint.ZIndex = 31
-	settingsHint.Parent = settingsPanel
-
-	tracerToggle.SetState(espSettings.showTracer)
-	skeletonToggle.SetState(espSettings.showSkeleton)
-	healthToggle.SetState(espSettings.showHealth)
-
-	tracerToggle.Button.MouseButton1Click:Connect(function()
-		espSettings.showTracer = not espSettings.showTracer
-		tracerToggle.SetState(espSettings.showTracer)
-		if not espSettings.showTracer then
-			for _, data in pairs(espFrames) do data.tracer.Visible = false end
-		end
-	end)
-
-	skeletonToggle.Button.MouseButton1Click:Connect(function()
-		espSettings.showSkeleton = not espSettings.showSkeleton
-		skeletonToggle.SetState(espSettings.showSkeleton)
-		if not espSettings.showSkeleton then
-			for _, data in pairs(espFrames) do
-				for _, l in ipairs(data.skeletonLines) do l.Visible = false end
-			end
-		end
-	end)
-
-	healthToggle.Button.MouseButton1Click:Connect(function()
-		espSettings.showHealth = not espSettings.showHealth
-		healthToggle.SetState(espSettings.showHealth)
-	end)
-
-	espSettingsBtn.MouseButton1Click:Connect(function()
-		settingsPanel.Visible = not settingsPanel.Visible
-	end)
-
-	local originalShowTab = showTab
-	showTab = function(tabName)
-		settingsPanel.Visible = false
-		originalShowTab(tabName)
-	end
 
 	espToggle.OnToggle(function(on)
 		if on then
 			for _, p in ipairs(Players:GetPlayers()) do
 				if p ~= player then createESPFrame(p) end
 			end
-			espPlayerAddedConn = Players.PlayerAdded:Connect(function(p) if p ~= player then createESPFrame(p) end end)
-			espPlayerRemovingConn = Players.PlayerRemoving:Connect(removeESPFrame)
+			Players.PlayerAdded:Connect(function(p) if p ~= player then createESPFrame(p) end end)
+			Players.PlayerRemoving:Connect(removeESPFrame)
 			if espConnection then espConnection:Disconnect() end
 			espConnection = RunService.Heartbeat:Connect(function()
 				for targetPlayer in pairs(espFrames) do updateESPFrame(targetPlayer) end
 			end)
 		else
-			settingsPanel.Visible = false
 			if espConnection then espConnection:Disconnect(); espConnection = nil end
-			if espPlayerAddedConn then espPlayerAddedConn:Disconnect(); espPlayerAddedConn = nil end
-			if espPlayerRemovingConn then espPlayerRemovingConn:Disconnect(); espPlayerRemovingConn = nil end
 			for targetPlayer in pairs(espFrames) do removeESPFrame(targetPlayer) end
 			espFrames = {}
 		end
@@ -2587,6 +2465,7 @@ function createMainMenu()
 	destroyButton.MouseButton1Click:Connect(function()
 		if espConnection then espConnection:Disconnect() end
 		if carDriveConnection then carDriveConnection:Disconnect() end
+		if aimConnection then aimConnection:Disconnect() end
 		screenGui:Destroy()
 	end)
 
@@ -2601,11 +2480,11 @@ function createMainMenu()
 			soonTabContent.Visible = false
 			teleportTabContent.Visible = false
 			transportTabContent.Visible = false
+			aimTabContent.Visible = false
 			dragBottom.Visible = false
 			dragLeft.Visible = false
 			dragRight.Visible = false
 			destroyButton.Visible = false
-			settingsPanel.Visible = false
 			TweenService:Create(mainFrame, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
 				Size = UDim2.new(0, 340, 0, 36)
 			}):Play()
@@ -2683,7 +2562,7 @@ function createMainMenu()
 	end
 
 	-- FLY
-	function createMobileControls()
+	createMobileControls = function()
 		local function mkBtn(text, pos, size)
 			local b = Instance.new("TextButton")
 			b.Size = UDim2.new(0, 60, 0, 60)
@@ -2730,7 +2609,7 @@ function createMainMenu()
 		bindHold(btnDown, "d")
 	end
 
-	function createFlyParts(char)
+	createFlyParts = function(char)
 		local root = char:WaitForChild("HumanoidRootPart")
 		if bodyVelocity then bodyVelocity:Destroy() end
 		if bodyGyro then bodyGyro:Destroy() end
@@ -2744,7 +2623,7 @@ function createMainMenu()
 		bodyGyro.Parent = root
 	end
 
-	function startFly()
+	startFly = function()
 		if flyConnection then return end
 		createMobileControls()
 		local char = player.Character
@@ -2791,7 +2670,7 @@ function createMainMenu()
 		end)
 	end
 
-	function stopFly()
+	stopFly = function()
 		if flyConnection then flyConnection:Disconnect(); flyConnection = nil end
 		if bodyVelocity then bodyVelocity:Destroy(); bodyVelocity = nil end
 		if bodyGyro then bodyGyro:Destroy(); bodyGyro = nil end
