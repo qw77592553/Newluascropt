@@ -124,6 +124,7 @@ local FLY_ACCEL = 35
 local FLY_VERTICAL_SPEED = 45
 
 local selectedVehicleType = "car"
+local spawnedVehicles = {}
 
 local carBtnForward = false
 local carBtnBackward = false
@@ -970,6 +971,16 @@ function createMainMenu()
 	end)
 
 	-- ================== TRANSPORT TAB ==================
+	local transportScroll = Instance.new("ScrollingFrame")
+	transportScroll.Size = UDim2.new(1, 0, 1, 0)
+	transportScroll.BackgroundTransparency = 1
+	transportScroll.BorderSizePixel = 0
+	transportScroll.ScrollBarThickness = 3
+	transportScroll.ScrollBarImageColor3 = Color3.fromRGB(50, 100, 220)
+	transportScroll.CanvasSize = UDim2.new(0, 0, 0, 500)
+	transportScroll.ZIndex = 3
+	transportScroll.Parent = transportTabContent
+
 	local transportTitle = Instance.new("TextLabel")
 	transportTitle.Size = UDim2.new(1, 0, 0, 18)
 	transportTitle.BackgroundTransparency = 1
@@ -979,7 +990,7 @@ function createMainMenu()
 	transportTitle.TextSize = 14
 	transportTitle.TextXAlignment = Enum.TextXAlignment.Left
 	transportTitle.ZIndex = 3
-	transportTitle.Parent = transportTabContent
+	transportTitle.Parent = transportScroll
 
 	local exitCarBtn2 = Instance.new("TextButton")
 	exitCarBtn2.Size = UDim2.new(0, 78, 0, 22)
@@ -992,7 +1003,7 @@ function createMainMenu()
 	exitCarBtn2.TextSize = 10
 	exitCarBtn2.ZIndex = 4
 	Instance.new("UICorner", exitCarBtn2).CornerRadius = UDim.new(0, 6)
-	exitCarBtn2.Parent = transportTabContent
+	exitCarBtn2.Parent = transportScroll
 
 	exitCarBtn2.MouseButton1Click:Connect(function()
 		if driving then exitCar() end
@@ -1008,7 +1019,6 @@ function createMainMenu()
 		f.ZIndex = 5
 		Instance.new("UICorner", f).CornerRadius = UDim.new(0, 3)
 		f.Parent = parent
-
 		local cabin = Instance.new("Frame")
 		cabin.Size = UDim2.new(0.55, 0, 0.5, 0)
 		cabin.Position = UDim2.new(0.2, 0, -0.45, 0)
@@ -1028,7 +1038,6 @@ function createMainMenu()
 		f.ZIndex = 5
 		Instance.new("UICorner", f).CornerRadius = UDim.new(0, 2)
 		f.Parent = parent
-
 		local cabin = Instance.new("Frame")
 		cabin.Size = UDim2.new(0.7, 0, 0.6, 0)
 		cabin.Position = UDim2.new(0.15, 0, -0.55, 0)
@@ -1048,7 +1057,6 @@ function createMainMenu()
 		f.ZIndex = 5
 		Instance.new("UICorner", f).CornerRadius = UDim.new(0, 2)
 		f.Parent = parent
-
 		local cabin = Instance.new("Frame")
 		cabin.Size = UDim2.new(0.28, 0, 0.7, 0)
 		cabin.Position = UDim2.new(0, 0, -0.65, 0)
@@ -1068,7 +1076,6 @@ function createMainMenu()
 		base.ZIndex = 5
 		Instance.new("UICorner", base).CornerRadius = UDim.new(0, 2)
 		base.Parent = parent
-
 		local turret = Instance.new("Frame")
 		turret.Size = UDim2.new(0.45, 0, 0.45, 0)
 		turret.Position = UDim2.new(0.2, 0, -0.55, 0)
@@ -1077,7 +1084,6 @@ function createMainMenu()
 		turret.ZIndex = 5
 		Instance.new("UICorner", turret).CornerRadius = UDim.new(0, 2)
 		turret.Parent = base
-
 		local barrel = Instance.new("Frame")
 		barrel.Size = UDim2.new(0.55, 0, 0.25, 0)
 		barrel.Position = UDim2.new(1, 0, 0.35, 0)
@@ -1097,7 +1103,6 @@ function createMainMenu()
 		body.ZIndex = 5
 		Instance.new("UICorner", body).CornerRadius = UDim.new(0, 4)
 		body.Parent = parent
-
 		local tail = Instance.new("Frame")
 		tail.Size = UDim2.new(0.3, 0, 0, 4)
 		tail.Position = UDim2.new(0.7, 0, 0.5, 0)
@@ -1106,7 +1111,6 @@ function createMainMenu()
 		tail.ZIndex = 5
 		Instance.new("UICorner", tail).CornerRadius = UDim.new(0, 1)
 		tail.Parent = parent
-
 		local rotor = Instance.new("Frame")
 		rotor.Size = UDim2.new(0.85, 0, 0, 2)
 		rotor.Position = UDim2.new(0.075, 0, 0.5, -16)
@@ -1115,7 +1119,6 @@ function createMainMenu()
 		rotor.ZIndex = 5
 		Instance.new("UICorner", rotor).CornerRadius = UDim.new(1, 0)
 		rotor.Parent = parent
-
 		local pole = Instance.new("Frame")
 		pole.Size = UDim2.new(0, 2, 0, 8)
 		pole.Position = UDim2.new(0.5, -1, 0.5, -10)
@@ -1134,7 +1137,6 @@ function createMainMenu()
 		body.ZIndex = 5
 		Instance.new("UICorner", body).CornerRadius = UDim.new(1, 0)
 		body.Parent = parent
-
 		local wing = Instance.new("Frame")
 		wing.Size = UDim2.new(0.9, 0, 0, 4)
 		wing.Position = UDim2.new(0.05, 0, 0.5, 1)
@@ -1143,7 +1145,6 @@ function createMainMenu()
 		wing.ZIndex = 5
 		Instance.new("UICorner", wing).CornerRadius = UDim.new(0, 1)
 		wing.Parent = parent
-
 		local tailWing = Instance.new("Frame")
 		tailWing.Size = UDim2.new(0, 2, 0, 12)
 		tailWing.Position = UDim2.new(0.78, 0, 0.5, -6)
@@ -1164,7 +1165,6 @@ function createMainMenu()
 
 	local cards = {}
 
-	-- Forward declare locals that updateInfoPanel will use
 	local infoAccent, infoName, infoDesc, infoTag
 	local selectedInfo
 
@@ -1220,7 +1220,7 @@ function createMainMenu()
 	gridFrame.Position = UDim2.new(0, 0, 0, 24)
 	gridFrame.BackgroundTransparency = 1
 	gridFrame.ZIndex = 3
-	gridFrame.Parent = transportTabContent
+	gridFrame.Parent = transportScroll
 
 	local CARD_W = 79
 	local CARD_H = 76
@@ -1341,7 +1341,6 @@ function createMainMenu()
 			selectedVehicleType = v.key
 			updateCardStyles()
 			updateInfoPanel()
-
 			local pulse = Instance.new("Frame")
 			pulse.Size = UDim2.new(1, 0, 1, 0)
 			pulse.BackgroundColor3 = v.grad1
@@ -1359,7 +1358,6 @@ function createMainMenu()
 		end)
 	end
 
-	-- Инфо-панель
 	local infoPanel = Instance.new("Frame")
 	infoPanel.Size = UDim2.new(1, 0, 0, 56)
 	infoPanel.Position = UDim2.new(0, 0, 0, 190)
@@ -1367,7 +1365,7 @@ function createMainMenu()
 	infoPanel.BorderSizePixel = 0
 	infoPanel.ZIndex = 3
 	Instance.new("UICorner", infoPanel).CornerRadius = UDim.new(0, 10)
-	infoPanel.Parent = transportTabContent
+	infoPanel.Parent = transportScroll
 
 	local infoStroke = Instance.new("UIStroke")
 	infoStroke.Color = Color3.fromRGB(45, 70, 130)
@@ -1421,7 +1419,6 @@ function createMainMenu()
 	Instance.new("UICorner", infoTag).CornerRadius = UDim.new(0, 4)
 	infoTag.Parent = infoPanel
 
-	-- Кнопка спавна
 	local spawnCustomCarBtn = Instance.new("TextButton")
 	spawnCustomCarBtn.Size = UDim2.new(1, 0, 0, 42)
 	spawnCustomCarBtn.Position = UDim2.new(0, 0, 0, 254)
@@ -1434,7 +1431,7 @@ function createMainMenu()
 	spawnCustomCarBtn.AutoButtonColor = false
 	spawnCustomCarBtn.ZIndex = 3
 	Instance.new("UICorner", spawnCustomCarBtn).CornerRadius = UDim.new(0, 10)
-	spawnCustomCarBtn.Parent = transportTabContent
+	spawnCustomCarBtn.Parent = transportScroll
 
 	local btnGradient = Instance.new("UIGradient")
 	btnGradient.Color = ColorSequence.new{
@@ -1464,10 +1461,10 @@ function createMainMenu()
 	end)
 
 	local statusLabel = Instance.new("TextLabel")
-	statusLabel.Size = UDim2.new(1, 0, 0, 60)
+	statusLabel.Size = UDim2.new(1, 0, 0, 32)
 	statusLabel.Position = UDim2.new(0, 0, 0, 300)
 	statusLabel.BackgroundTransparency = 1
-	statusLabel.Text = "W/S — газ/назад    A/D — поворот\nSpace/Shift — вверх/вниз (для летающих)\nE — выйти"
+	statusLabel.Text = "W/S — газ, A/D — руль, Space/Shift — вверх/вниз, E — выйти"
 	statusLabel.TextColor3 = Color3.fromRGB(130, 155, 200)
 	statusLabel.Font = Enum.Font.Gotham
 	statusLabel.TextSize = 9
@@ -1475,10 +1472,207 @@ function createMainMenu()
 	statusLabel.TextYAlignment = Enum.TextYAlignment.Top
 	statusLabel.TextWrapped = true
 	statusLabel.ZIndex = 3
-	statusLabel.Parent = transportTabContent
+	statusLabel.Parent = transportScroll
+
+	-- ================== УПРАВЛЕНИЕ ТРАНСПОРТОМ ==================
+	local manageTitle = Instance.new("TextLabel")
+	manageTitle.Size = UDim2.new(1, -90, 0, 18)
+	manageTitle.Position = UDim2.new(0, 0, 0, 340)
+	manageTitle.BackgroundTransparency = 1
+	manageTitle.Text = "Управление транспортом"
+	manageTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+	manageTitle.Font = Enum.Font.GothamBold
+	manageTitle.TextSize = 12
+	manageTitle.TextXAlignment = Enum.TextXAlignment.Left
+	manageTitle.ZIndex = 3
+	manageTitle.Parent = transportScroll
+
+	local deleteAllBtn = Instance.new("TextButton")
+	deleteAllBtn.Size = UDim2.new(0, 84, 0, 18)
+	deleteAllBtn.Position = UDim2.new(1, -84, 0, 340)
+	deleteAllBtn.BackgroundColor3 = Color3.fromRGB(180, 45, 45)
+	deleteAllBtn.BorderSizePixel = 0
+	deleteAllBtn.Text = "Удалить все"
+	deleteAllBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	deleteAllBtn.Font = Enum.Font.GothamBold
+	deleteAllBtn.TextSize = 10
+	deleteAllBtn.ZIndex = 4
+	Instance.new("UICorner", deleteAllBtn).CornerRadius = UDim.new(0, 6)
+	deleteAllBtn.Parent = transportScroll
+
+	local deleteAllStroke = Instance.new("UIStroke")
+	deleteAllStroke.Color = Color3.fromRGB(255, 100, 100)
+	deleteAllStroke.Thickness = 1
+	deleteAllStroke.Transparency = 0.5
+	deleteAllStroke.Parent = deleteAllBtn
+
+	local vehicleListFrame = Instance.new("ScrollingFrame")
+	vehicleListFrame.Size = UDim2.new(1, 0, 0, 120)
+	vehicleListFrame.Position = UDim2.new(0, 0, 0, 364)
+	vehicleListFrame.BackgroundColor3 = Color3.fromRGB(14, 20, 40)
+	vehicleListFrame.BorderSizePixel = 0
+	vehicleListFrame.ScrollBarThickness = 3
+	vehicleListFrame.ScrollBarImageColor3 = Color3.fromRGB(50, 100, 220)
+	vehicleListFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+	vehicleListFrame.ZIndex = 3
+	Instance.new("UICorner", vehicleListFrame).CornerRadius = UDim.new(0, 8)
+	vehicleListFrame.Parent = transportScroll
+
+	local vehicleListStroke = Instance.new("UIStroke")
+	vehicleListStroke.Color = Color3.fromRGB(40, 60, 110)
+	vehicleListStroke.Thickness = 1
+	vehicleListStroke.Transparency = 0.5
+	vehicleListStroke.Parent = vehicleListFrame
+
+	local vehicleLayout = Instance.new("UIListLayout")
+	vehicleLayout.Padding = UDim.new(0, 4)
+	vehicleLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	vehicleLayout.Parent = vehicleListFrame
+
+	local emptyLabel = Instance.new("TextLabel")
+	emptyLabel.Size = UDim2.new(1, 0, 0, 40)
+	emptyLabel.Position = UDim2.new(0, 0, 0, 40)
+	emptyLabel.BackgroundTransparency = 1
+	emptyLabel.Text = "Пока нет транспорта"
+	emptyLabel.TextColor3 = Color3.fromRGB(120, 145, 200)
+	emptyLabel.Font = Enum.Font.Gotham
+	emptyLabel.TextSize = 11
+	emptyLabel.ZIndex = 4
+	emptyLabel.Parent = vehicleListFrame
+
+	local refreshVehicleList
+
+	local function deleteVehicle(index)
+		local data = spawnedVehicles[index]
+		if not data then return end
+		if driving and activeCar == data.model then
+			exitCar()
+		end
+		if data.model and data.model.Parent then
+			data.model:Destroy()
+		end
+		table.remove(spawnedVehicles, index)
+		refreshVehicleList()
+	end
+
+	local function deleteAllVehicles()
+		if driving then exitCar() end
+		for _, data in ipairs(spawnedVehicles) do
+			if data.model and data.model.Parent then
+				data.model:Destroy()
+			end
+		end
+		spawnedVehicles = {}
+		refreshVehicleList()
+	end
+
+	refreshVehicleList = function()
+		for _, c in ipairs(vehicleListFrame:GetChildren()) do
+			if c:IsA("TextButton") then c:Destroy() end
+		end
+
+		if #spawnedVehicles == 0 then
+			emptyLabel.Visible = true
+			vehicleListFrame.CanvasSize = UDim2.new(0, 0, 0, 80)
+			return
+		end
+		emptyLabel.Visible = false
+
+		for i, data in ipairs(spawnedVehicles) do
+			local row = Instance.new("TextButton")
+			row.Size = UDim2.new(1, -8, 0, 32)
+			row.Position = UDim2.new(0, 4, 0, (i - 1) * 36)
+			row.BackgroundColor3 = Color3.fromRGB(26, 36, 65)
+			row.BorderSizePixel = 0
+			row.Text = ""
+			row.AutoButtonColor = false
+			row.LayoutOrder = i
+			row.ZIndex = 4
+			Instance.new("UICorner", row).CornerRadius = UDim.new(0, 6)
+			row.Parent = vehicleListFrame
+
+			local rowStroke = Instance.new("UIStroke")
+			rowStroke.Color = Color3.fromRGB(45, 65, 115)
+			rowStroke.Thickness = 1
+			rowStroke.Transparency = 0.5
+			rowStroke.Parent = row
+
+			local numLabel = Instance.new("TextLabel")
+			numLabel.Size = UDim2.new(0, 26, 0, 26)
+			numLabel.Position = UDim2.new(0, 4, 0, 3)
+			numLabel.BackgroundColor3 = Color3.fromRGB(45, 100, 220)
+			numLabel.BorderSizePixel = 0
+			numLabel.Text = tostring(i)
+			numLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+			numLabel.Font = Enum.Font.GothamBold
+			numLabel.TextSize = 12
+			numLabel.ZIndex = 5
+			Instance.new("UICorner", numLabel).CornerRadius = UDim.new(0, 6)
+			numLabel.Parent = row
+
+			local nameLabel = Instance.new("TextLabel")
+			nameLabel.Size = UDim2.new(1, -110, 1, 0)
+			nameLabel.Position = UDim2.new(0, 36, 0, 0)
+			nameLabel.BackgroundTransparency = 1
+			nameLabel.Text = data.name
+			nameLabel.TextColor3 = Color3.fromRGB(230, 240, 255)
+			nameLabel.Font = Enum.Font.GothamSemibold
+			nameLabel.TextSize = 11
+			nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+			nameLabel.ZIndex = 5
+			nameLabel.Parent = row
+
+			local delBtn = Instance.new("TextButton")
+			delBtn.Size = UDim2.new(0, 60, 0, 22)
+			delBtn.Position = UDim2.new(1, -66, 0, 5)
+			delBtn.BackgroundColor3 = Color3.fromRGB(170, 45, 55)
+			delBtn.BorderSizePixel = 0
+			delBtn.Text = "Удалить"
+			delBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+			delBtn.Font = Enum.Font.GothamBold
+			delBtn.TextSize = 10
+			delBtn.AutoButtonColor = false
+			delBtn.ZIndex = 6
+			Instance.new("UICorner", delBtn).CornerRadius = UDim.new(0, 5)
+			delBtn.Parent = row
+
+			delBtn.MouseEnter:Connect(function()
+				TweenService:Create(delBtn, TweenInfo.new(0.15), {
+					BackgroundColor3 = Color3.fromRGB(210, 65, 75),
+				}):Play()
+			end)
+			delBtn.MouseLeave:Connect(function()
+				TweenService:Create(delBtn, TweenInfo.new(0.15), {
+					BackgroundColor3 = Color3.fromRGB(170, 45, 55),
+				}):Play()
+			end)
+
+			delBtn.MouseButton1Click:Connect(function()
+				deleteVehicle(i)
+			end)
+		end
+
+		vehicleListFrame.CanvasSize = UDim2.new(0, 0, 0, #spawnedVehicles * 36 + 8)
+	end
+
+	deleteAllBtn.MouseEnter:Connect(function()
+		TweenService:Create(deleteAllBtn, TweenInfo.new(0.15), {
+			BackgroundColor3 = Color3.fromRGB(210, 60, 60),
+		}):Play()
+	end)
+	deleteAllBtn.MouseLeave:Connect(function()
+		TweenService:Create(deleteAllBtn, TweenInfo.new(0.15), {
+			BackgroundColor3 = Color3.fromRGB(180, 45, 45),
+		}):Play()
+	end)
+
+	deleteAllBtn.MouseButton1Click:Connect(function()
+		deleteAllVehicles()
+	end)
 
 	updateCardStyles()
 	updateInfoPanel()
+	refreshVehicleList()
 
 	spawnCustomCarBtn.MouseButton1Click:Connect(function()
 		if driving then
@@ -1503,9 +1697,16 @@ function createMainMenu()
 			return
 		end
 
+		table.insert(spawnedVehicles, {
+			model = car,
+			name = (selectedInfo and selectedInfo.label or "Vehicle") .. " #" .. tostring(#spawnedVehicles + 1),
+			type = selectedVehicleType,
+		})
+		refreshVehicleList()
+
 		local entered = enterCar(car, seat, canFly, rotors)
 		if entered then
-			statusLabel.Text = (selectedInfo and selectedInfo.label or "Транспорт") .. " готов!\nW/S — газ, A/D — руль" .. (canFly and "\nSpace/Shift — вверх/вниз" or "") .. "\nE — выйти"
+			statusLabel.Text = (selectedInfo and selectedInfo.label or "Транспорт") .. " готов! E — выйти."
 			statusLabel.TextColor3 = Color3.fromRGB(120, 255, 140)
 		else
 			statusLabel.Text = "Транспорт создан, но сесть не удалось."
